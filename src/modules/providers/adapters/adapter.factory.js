@@ -64,6 +64,11 @@ const registry = new Map([
     ['brand1 card', AlkasrVipAdapter], // name
     ['brand1card', AlkasrVipAdapter],  // compact
 
+    // ── zero1-store (Uses Alkasr Adapter) ─────────────────────────────────────
+    ['zero1-store', AlkasrVipAdapter], // slug
+    ['zero1 store', AlkasrVipAdapter], // name
+    ['zero1store', AlkasrVipAdapter],  // compact
+
     // ── Miral Store (Uses Alkasr Adapter) ─────────────────────────────────────
     ['miral-store', AlkasrVipAdapter], // slug
     ['miral store', AlkasrVipAdapter], // name

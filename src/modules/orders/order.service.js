@@ -96,15 +96,76 @@ const endSessionQuietly = (session) => {
     }
 };
 
-const notifyAdminOrderCreated = ({ order, userId, productName, quantity }) => {
+const humanizeOrderFieldKey = (key) => String(key || '')
+    .trim()
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+
+const toPlainFieldMap = (value) => {
+    if (!value) return {};
+    if (value instanceof Map) return Object.fromEntries(value.entries());
+    if (typeof value.toObject === 'function') return value.toObject();
+    if (typeof value === 'object' && !Array.isArray(value)) return { ...value };
+    return {};
+};
+
+const stringifyOrderFieldValue = (value) => {
+    if (value === null || value === undefined) return '';
+    if (Array.isArray(value)) return value.map(stringifyOrderFieldValue).filter(Boolean).join(', ');
+    if (typeof value === 'object') return JSON.stringify(value);
+    return String(value).trim();
+};
+
+const getOrderFieldLabel = (key, order, product) => {
+    const candidates = [
+        ...(Array.isArray(order?.customerInput?.fieldsSnapshot) ? order.customerInput.fieldsSnapshot : []),
+        ...(Array.isArray(product?.orderFields) ? product.orderFields : []),
+        ...(Array.isArray(product?.dynamicFields) ? product.dynamicFields : []),
+    ];
+
+    const field = candidates.find((item) => (
+        String(item?.key || item?.name || item?.id || '').trim() === key
+    ));
+
+    return String(
+        field?.labelAr
+        || field?.label
+        || field?.nameAr
+        || field?.name
+        || humanizeOrderFieldKey(key)
+    ).trim();
+};
+
+const buildOrderFieldsNotificationBlock = (order, product = null) => {
+    const values = {
+        ...toPlainFieldMap(order?.orderFieldsValues),
+        ...toPlainFieldMap(order?.customerInput?.values),
+        ...toPlainFieldMap(order?.customInputs),
+    };
+
+    const lines = Object.entries(values)
+        .map(([rawKey, rawValue]) => {
+            const key = String(rawKey || '').trim();
+            const value = stringifyOrderFieldValue(rawValue);
+            if (!key || !value) return null;
+            return `${getOrderFieldLabel(key, order, product)}: ${value}`;
+        })
+        .filter(Boolean);
+
+    return lines.length > 0 ? `\n\n*بيانات الطلب:*\n${lines.join('\n')}` : '';
+};
+
+const notifyAdminOrderCreated = ({ order, userId, productName, quantity, product = null }) => {
     try {
         (async () => {
             const user = await User.findById(userId).select('name email').lean();
             const orderRef = order?.displayId || order?.orderNumber || order?._id;
             const userName = user?.name || user?.email || userId;
+            const orderFieldsBlock = buildOrderFieldsNotificationBlock(order, product || order?.productId);
 
             await whatsappService.sendAdminNotification(
-                `📦 *طلب جديد!*\nرقم: ${orderRef}\nالمستخدم: ${userName}\nالمنتج: ${productName}\nالكمية: ${quantity}`
+                `📦 *طلب جديد!*\nرقم: ${orderRef}\nالمستخدم: ${userName}\nالمنتج: ${productName}\nالكمية: ${quantity}${orderFieldsBlock}`
             );
         })().catch((err) => {
             console.error('WhatsApp Notification failed:', err.message);
@@ -747,6 +808,7 @@ const _attemptCreateOrder = async (
                 userId,
                 productName: product.name,
                 quantity: qty,
+                product,
             });
 
             if (isAutomatic) {
@@ -982,6 +1044,7 @@ const _attemptCreateOrder = async (
             userId,
             productName: product.name,
             quantity: qty,
+            product,
         });
 
         if (isAutomatic) {
