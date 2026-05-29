@@ -1,5 +1,6 @@
 'use strict';
 
+const fs = require('fs/promises');
 const path = require('path');
 const qrcode = require('qrcode');
 
@@ -25,6 +26,8 @@ const WHATSAPP_STATE = Object.freeze({
 
 const AUTH_DATA_PATH = process.env.WHATSAPP_AUTH_DATA_PATH
     || path.join(process.cwd(), '.wwebjs_auth');
+const CACHE_DATA_PATH = process.env.WHATSAPP_CACHE_DATA_PATH
+    || path.join(process.cwd(), '.wwebjs_cache');
 
 let client = null;
 let currentQrCode = null;
@@ -33,6 +36,7 @@ let lastError = null;
 let isInitializing = false;
 let reconnectTimer = null;
 let manualShutdown = false;
+let lifecycleOperationId = 0;
 
 const setState = (state) => {
     currentState = state;
@@ -150,6 +154,9 @@ const buildClient = () => {
                 '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
             ],
         },
+        webVersionCache: {
+            type: 'none',
+        },
     });
 };
 
@@ -178,9 +185,10 @@ const destroyWhatsAppClient = async () => {
 };
 
 const initializeWhatsAppClient = async ({ force = false } = {}) => {
-    if (isInitializing) return getStatus();
+    if (isInitializing && !force) return getStatus();
     if (client && !force) return getStatus();
 
+    const operationId = ++lifecycleOperationId;
     isInitializing = true;
     currentQrCode = null;
     setLastError(null);
@@ -198,19 +206,37 @@ const initializeWhatsAppClient = async ({ force = false } = {}) => {
         await client.initialize();
         return getStatus();
     } catch (err) {
-        client = null;
-        currentQrCode = null;
-        setLastError(err);
-        setState(WHATSAPP_STATE.ERROR);
+        if (operationId === lifecycleOperationId) {
+            client = null;
+            currentQrCode = null;
+            setLastError(err);
+            setState(WHATSAPP_STATE.ERROR);
+        }
         console.error('[WhatsApp] initialization failed:', err.message);
         return getStatus();
     } finally {
-        isInitializing = false;
+        if (operationId === lifecycleOperationId) {
+            isInitializing = false;
+        }
     }
 };
 
 const reconnectWhatsAppClient = async () => {
     await destroyWhatsAppClient();
+    return initializeWhatsAppClient({ force: true });
+};
+
+const deleteSessionDirectories = async () => {
+    await Promise.all([
+        fs.rm(AUTH_DATA_PATH, { recursive: true, force: true }),
+        fs.rm(CACHE_DATA_PATH, { recursive: true, force: true }),
+    ]);
+};
+
+const resetWhatsAppClient = async () => {
+    lifecycleOperationId += 1;
+    await destroyWhatsAppClient();
+    await deleteSessionDirectories();
     return initializeWhatsAppClient({ force: true });
 };
 
@@ -237,6 +263,7 @@ module.exports = {
     WHATSAPP_STATE,
     initializeWhatsAppClient,
     reconnectWhatsAppClient,
+    resetWhatsAppClient,
     destroyWhatsAppClient,
     getStatus,
     sendAdminNotification,

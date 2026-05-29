@@ -16,7 +16,13 @@ const reconnect = async (_req, res) => {
     sendSuccess(res, status, 'WhatsApp reconnect triggered');
 };
 
+const reset = async (_req, res) => {
+    const status = await whatsappService.resetWhatsAppClient();
+    sendSuccess(res, status, 'WhatsApp hard reset triggered');
+};
+
 module.exports = {
     getStatus,
     reconnect,
+    reset,
 };

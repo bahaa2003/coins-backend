@@ -74,6 +74,11 @@ const registry = new Map([
     ['miral store', AlkasrVipAdapter], // name
     ['miralstore', AlkasrVipAdapter],  // compact
 
+    // ── Mlook Alarab (Uses Alkasr Adapter) ─────────────────────────────────────
+    ['mlook-alarab', AlkasrVipAdapter], // slug
+    ['mlook alarab', AlkasrVipAdapter], // name
+    ['mlookalarab', AlkasrVipAdapter],  // compact
+
     // -- Ibra Store ------------------------------------------------------------
     ['ibra-store', IbraAdapter],
     ['ibrastore', IbraAdapter],
