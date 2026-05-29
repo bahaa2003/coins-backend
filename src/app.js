@@ -30,6 +30,7 @@ const targetRoutes = require('./modules/targets/target.routes'); // ← target c
 const notificationRoutes = require('./modules/notifications/notification.routes'); // ← notifications
 const currencyRoutes = require('./modules/currency/currency.routes');
 const whatsappRoutes = require('./modules/whatsapp/whatsapp.routes');
+const resellerRoutes = require('./modules/reseller/reseller.routes');
 const uploadRoutes = require('./shared/routes/upload.routes');
 const path = require('path');
 // Seed default settings on startup (idempotent, no-op if already seeded)
@@ -114,6 +115,8 @@ app.use(`${API_PREFIX}/wallet`, walletRoutes);
 app.use(`${API_PREFIX}/audit`, auditRoutes);
 app.use(`${API_PREFIX}/deposits`, depositRoutes);
 app.use(`${API_PREFIX}/providers`, providerRoutes);
+app.use(`${API_PREFIX}/v1/reseller`, resellerRoutes);
+app.use(`${API_PREFIX}/client`, resellerRoutes);
 
 // ── User Panel ─────────────────────────────────────────────────────────────────
 app.use(`${API_PREFIX}/me`, meRoutes);

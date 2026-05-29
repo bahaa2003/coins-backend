@@ -172,6 +172,10 @@ const createProductValidation = [
     body('dynamicFields.*.required')
         .optional()
         .isBoolean().withMessage('dynamicFields[].required must be a boolean'),
+
+    body('dynamicFields.*.isVerifiable')
+        .optional()
+        .isBoolean().withMessage('dynamicFields[].isVerifiable must be a boolean'),
 ];
 
 // ─── Admin: publish from provider product ────────────────────────────────────
@@ -275,6 +279,10 @@ const publishProductValidation = [
     body('dynamicFields.*.required')
         .optional()
         .isBoolean().withMessage('dynamicFields[].required must be a boolean'),
+
+    body('dynamicFields.*.isVerifiable')
+        .optional()
+        .isBoolean().withMessage('dynamicFields[].isVerifiable must be a boolean'),
 ];
 
 // ─── Admin: update product ────────────────────────────────────────────────────
@@ -396,6 +404,18 @@ const updateProductValidation = [
     body('dynamicFields.*.required')
         .optional()
         .isBoolean().withMessage('dynamicFields[].required must be a boolean'),
+
+    body('dynamicFields.*.isVerifiable')
+        .optional()
+        .isBoolean().withMessage('dynamicFields[].isVerifiable must be a boolean'),
+];
+
+const verifyFieldValidation = [
+    param('id').isMongoId().withMessage('Invalid product ID'),
+    body('fieldValue')
+        .trim()
+        .notEmpty().withMessage('fieldValue is required')
+        .isLength({ max: 120 }).withMessage('fieldValue cannot exceed 120 characters'),
 ];
 
 module.exports = {
@@ -404,4 +424,5 @@ module.exports = {
     createProductValidation,
     publishProductValidation,
     updateProductValidation,
+    verifyFieldValidation,
 };

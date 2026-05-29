@@ -1,6 +1,8 @@
 'use strict';
 
 const productService = require('./product.service');
+const { Product } = require('./product.model');
+const { getProviderAdapter } = require('../providers/adapters/adapter.factory');
 const { sendSuccess, sendCreated, sendPaginated } = require('../../shared/utils/apiResponse');
 const catchAsync = require('../../shared/utils/catchAsync');
 
@@ -93,6 +95,57 @@ const getProduct = catchAsync(async (req, res) => {
     sendSuccess(res, responseProduct);
 });
 
+/**
+ * POST /api/products/:id/verify-field
+ */
+const verifyField = catchAsync(async (req, res) => {
+    try {
+        const product = await Product.findById(req.params.id).populate('provider');
+
+        if (!product || product.deletedAt || product.isActive === false) {
+            return res.status(404).json({
+                success: false,
+                message: 'Product not found',
+            });
+        }
+
+        const verifiableFields = [
+            ...(Array.isArray(product.orderFields) ? product.orderFields : []),
+            ...(Array.isArray(product.dynamicFields) ? product.dynamicFields : []),
+        ].filter((field) => field?.isVerifiable === true);
+
+        if (verifiableFields.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'This product has no verifiable fields.',
+            });
+        }
+
+        if (!product.provider) {
+            return res.status(400).json({
+                success: false,
+                message: 'This product is not linked to a provider.',
+            });
+        }
+
+        const adapter = getProviderAdapter(product.provider, { strict: true });
+        if (typeof adapter.validateUser !== 'function') {
+            return res.status(400).json({
+                success: false,
+                message: 'The linked provider does not support field verification.',
+            });
+        }
+
+        const data = await adapter.validateUser(req.body.fieldValue);
+        return sendSuccess(res, data, 'Field verified successfully.');
+    } catch (err) {
+        return res.status(400).json({
+            success: false,
+            message: err.message || 'Field verification failed.',
+        });
+    }
+});
+
 // ─── Admin only ───────────────────────────────────────────────────────────────
 
 /**
@@ -139,4 +192,5 @@ module.exports = {
     publishProduct,
     updateProduct,
     toggleStatus,
+    verifyField,
 };

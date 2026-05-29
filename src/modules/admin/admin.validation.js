@@ -74,6 +74,7 @@ const updateUserSchema = Joi.object({
     groupId: objectId().allow(null),
     status: Joi.string().valid('PENDING', 'ACTIVE', 'REJECTED'),
     verified: Joi.boolean(),
+    isApiEnabled: Joi.boolean(),
     creditLimit: Joi.number().min(0).messages({
         'number.min': 'Credit limit cannot be negative',
     }),
@@ -173,6 +174,7 @@ const orderFieldSchema = Joi.object({
     max: Joi.number().allow(null),
     sortOrder: Joi.number().integer().default(0),
     isActive: Joi.boolean().default(true),
+    isVerifiable: Joi.boolean().default(false),
 });
 
 const dynamicFieldSchema = Joi.object({
@@ -180,6 +182,7 @@ const dynamicFieldSchema = Joi.object({
     label: Joi.string().trim().required(),
     type: Joi.string().valid('text', 'number', 'email', 'select', 'image', 'file').default('text'),
     required: Joi.boolean().default(true),
+    isVerifiable: Joi.boolean().default(false),
 });
 
 const positiveDecimal = Joi.alternatives().try(

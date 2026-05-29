@@ -382,6 +382,11 @@ const productSchema = new mongoose.Schema(
                         type: Boolean,
                         default: true,
                     },
+
+                    isVerifiable: {
+                        type: Boolean,
+                        default: false,
+                    },
                 },
             ],
             default: [],
@@ -413,6 +418,10 @@ const productSchema = new mongoose.Schema(
                     required: {
                         type: Boolean,
                         default: true,
+                    },
+                    isVerifiable: {
+                        type: Boolean,
+                        default: false,
                     },
                 },
             ],

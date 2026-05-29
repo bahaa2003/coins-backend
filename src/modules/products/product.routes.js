@@ -8,6 +8,7 @@ const {
     createProductValidation,
     publishProductValidation,
     updateProductValidation,
+    verifyFieldValidation,
 } = require('./product.validation');
 const validate = require('../../shared/middlewares/validate');
 const authenticate = require('../../shared/middlewares/authenticate');
@@ -40,6 +41,18 @@ router.get(
     authenticate,
     productIdParam, validate,
     productController.getProduct
+);
+
+/**
+ * @route  POST /api/products/:id/verify-field
+ * @desc   Verify a pre-purchase dynamic field against the linked provider
+ * @access Authenticated
+ */
+router.post(
+    '/:id/verify-field',
+    authenticate,
+    verifyFieldValidation, validate,
+    productController.verifyField
 );
 
 // ─── Admin only ───────────────────────────────────────────────────────────────

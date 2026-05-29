@@ -34,6 +34,7 @@ const { RoyalCrownAdapter } = require('./royalCrown.adapter');
 const { TorosfonAdapter } = require('./toros.adapter');
 const { AlkasrVipAdapter } = require('./alkasr.adapter');
 const { IbraAdapter } = require('./ibra.adapter');
+const { DealerApiAdapter } = require('./dealerApi.service');
 
 // ─── Registry ────────────────────────────────────────────────────────────────
 //
@@ -84,6 +85,11 @@ const registry = new Map([
     ['ibrastore', IbraAdapter],
     ['ibra', IbraAdapter],
 
+    // -- Dealer API ------------------------------------------------------------
+    ['dealer-api', DealerApiAdapter],
+    ['dealer api', DealerApiAdapter],
+    ['dealerapi', DealerApiAdapter],
+    ['dealer', DealerApiAdapter],
 
     // ── Default test / dev adapter ────────────────────────────────────────────
     ['mock', MockProviderAdapter],

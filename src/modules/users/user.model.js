@@ -252,6 +252,36 @@ const userSchema = new mongoose.Schema(
             min: [0, 'Quantity used cannot be negative'],
         },
 
+        isApiEnabled: {
+            type: Boolean,
+            default: false,
+        },
+
+        apiToken: {
+            type: String,
+            select: false,
+            index: true,
+            default: null,
+        },
+
+        apiSecret: {
+            type: String,
+            select: false,
+            default: null,
+        },
+
+        whitelistIps: {
+            type: [String],
+            default: [],
+        },
+
+        webhookUrl: {
+            type: String,
+            trim: true,
+            default: null,
+            match: [/^https?:\/\//, 'webhookUrl must start with http:// or https://'],
+        },
+
         // ── Currency ──────────────────────────────────────────────────────────
         /**
          * The ISO 4217 currency code for this user's wallet.
@@ -340,9 +370,36 @@ userSchema.pre('save', async function (next) {
     next();
 });
 
+userSchema.pre('save', async function (next) {
+    if (!this.apiToken || !this.isModified('apiToken')) return next();
+    if (/^\$2[aby]\$\d{2}\$/.test(this.apiToken)) return next();
+    this.apiToken = await bcrypt.hash(this.apiToken, config.bcrypt.rounds);
+    next();
+});
+
+userSchema.pre('findOneAndUpdate', async function (next) {
+    const update = this.getUpdate() || {};
+    const nextToken = update.apiToken ?? update.$set?.apiToken;
+    if (!nextToken || /^\$2[aby]\$\d{2}\$/.test(String(nextToken))) return next();
+
+    const hashed = await bcrypt.hash(String(nextToken), config.bcrypt.rounds);
+    if (update.$set?.apiToken) {
+        update.$set.apiToken = hashed;
+    } else {
+        update.apiToken = hashed;
+    }
+    this.setUpdate(update);
+    return next();
+});
+
 // ─── Instance Methods ─────────────────────────────────────────────────────────
 userSchema.methods.comparePassword = async function (candidatePassword) {
     return bcrypt.compare(candidatePassword, this.password);
+};
+
+userSchema.methods.compareApiToken = async function (candidateToken) {
+    if (!this.apiToken || !candidateToken) return false;
+    return bcrypt.compare(candidateToken, this.apiToken);
 };
 
 /**
@@ -353,6 +410,8 @@ userSchema.methods.toSafeObject = function () {
     delete obj.password;
     delete obj.twoFactorOtp;
     delete obj.twoFactorOtpExpires;
+    delete obj.apiToken;
+    delete obj.apiSecret;
     return obj;
 };
 

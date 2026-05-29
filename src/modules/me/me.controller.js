@@ -8,13 +8,14 @@
  */
 
 const { User } = require('../users/user.model');
+const crypto = require('crypto');
 const { WalletTransaction } = require('../wallet/walletTransaction.model');
 const orderService = require('../orders/order.service');
 const depositService = require('../deposits/deposit.service');
 const productService = require('../products/product.service');
 const { sendSuccess, sendCreated, sendPaginated } = require('../../shared/utils/apiResponse');
 const catchAsync = require('../../shared/utils/catchAsync');
-const { BusinessRuleError, NotFoundError } = require('../../shared/errors/AppError');
+const { AuthorizationError, BusinessRuleError, NotFoundError } = require('../../shared/errors/AppError');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -52,8 +53,48 @@ const getProfile = catchAsync(async (req, res) => {
         quantityLimit: user.quantityLimit || 0,
         quantityUsed: user.quantityUsed || 0,
         quantityRemaining: user.quantityRemaining || 0,
+        isApiEnabled: Boolean(user.isApiEnabled),
+        whitelistIps: Array.isArray(user.whitelistIps) ? user.whitelistIps : [],
+        webhookUrl: user.webhookUrl || '',
         createdAt: user.createdAt,
     }, 'Profile retrieved.');
+});
+
+const generateApiToken = catchAsync(async (req, res) => {
+    const user = await User.findById(req.user._id).select('+apiToken isApiEnabled');
+    if (!user) throw new NotFoundError('User');
+    if (!user.isApiEnabled) {
+        throw new AuthorizationError('API access is not enabled for your account.');
+    }
+
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    user.apiToken = rawToken;
+    await user.save();
+
+    sendSuccess(res, { rawToken }, 'API token generated. Copy it now; it will not be shown again.');
+});
+
+const updateApiSettings = catchAsync(async (req, res) => {
+    const user = await User.findById(req.user._id);
+    if (!user) throw new NotFoundError('User');
+    if (!user.isApiEnabled) {
+        throw new AuthorizationError('API access is not enabled for your account.');
+    }
+
+    const whitelistIps = Array.isArray(req.body.whitelistIps)
+        ? req.body.whitelistIps.map((ip) => String(ip || '').trim()).filter(Boolean)
+        : [];
+    const webhookUrl = String(req.body.webhookUrl || '').trim();
+
+    user.whitelistIps = [...new Set(whitelistIps)];
+    user.webhookUrl = webhookUrl || null;
+    await user.save();
+
+    sendSuccess(res, {
+        isApiEnabled: Boolean(user.isApiEnabled),
+        whitelistIps: user.whitelistIps,
+        webhookUrl: user.webhookUrl || '',
+    }, 'API settings updated.');
 });
 
 // =============================================================================
@@ -406,6 +447,8 @@ const getDeposit = catchAsync(async (req, res) => {
 
 module.exports = {
     getProfile,
+    generateApiToken,
+    updateApiSettings,
     getWallet,
     getTransactions,
     getOrders,

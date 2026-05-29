@@ -157,6 +157,7 @@ const ACTOR_ROLES = Object.freeze({
     ADMIN: 'ADMIN',
     SUPERVISOR: 'SUPERVISOR',
     CUSTOMER: 'CUSTOMER',
+    RESELLER: 'RESELLER',
     SYSTEM: 'SYSTEM',
 });
 

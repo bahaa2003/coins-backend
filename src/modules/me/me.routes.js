@@ -51,6 +51,29 @@ router.use(authenticate, requireActiveUser);
  */
 router.get('/', me.getProfile);
 
+router.post('/api-token/generate', me.generateApiToken);
+
+router.put(
+    '/api-settings',
+    [
+        body('whitelistIps')
+            .optional()
+            .isArray().withMessage('whitelistIps must be an array'),
+        body('whitelistIps.*')
+            .optional()
+            .isString().trim()
+            .isLength({ min: 1, max: 64 }).withMessage('Each whitelist IP must be 1-64 characters'),
+        body('webhookUrl')
+            .optional({ nullable: true })
+            .isString().trim()
+            .isLength({ max: 500 }).withMessage('webhookUrl cannot exceed 500 characters')
+            .custom((value) => !value || /^https?:\/\//.test(value))
+            .withMessage('webhookUrl must start with http:// or https://'),
+    ],
+    validate,
+    me.updateApiSettings
+);
+
 // ─── Wallet ───────────────────────────────────────────────────────────────────
 
 router.get('/wallet', me.getWallet);
