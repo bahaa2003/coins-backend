@@ -11,6 +11,8 @@ const isPositiveDecimalString = (value) => {
     return isPositive(value);
 };
 
+const emptyStringToZero = (value) => (value === '' ? 0 : value);
+
 const validateDynamicFields = (fields = []) => {
     if (!Array.isArray(fields)) return true;
 
@@ -144,6 +146,7 @@ const publishProductValidation = [
         .custom((v) => v == null || isPositiveDecimalString(v)).withMessage('basePrice must be > 0'),
 
     body('costPrice')
+        .customSanitizer(emptyStringToZero)
         .optional()
         .isFloat({ min: 0 }).withMessage('costPrice must be >= 0'),
 
@@ -223,7 +226,10 @@ const updatePublishedProductValidation = [
     body('name').optional().isString().trim().isLength({ min: 2, max: 200 }),
     body('description').optional({ nullable: true }).isString().trim(),
     body('basePrice').optional().custom((v) => v == null || isPositiveDecimalString(v)),
-    body('costPrice').optional().isFloat({ min: 0 }).withMessage('costPrice must be >= 0'),
+    body('costPrice')
+        .customSanitizer(emptyStringToZero)
+        .optional()
+        .isFloat({ min: 0 }).withMessage('costPrice must be >= 0'),
     body('minQty').optional().isInt({ min: 1 }),
     body('maxQty').optional().isInt({ min: 1 }),
     body('category').optional({ nullable: true }).isString().trim(),

@@ -196,11 +196,20 @@ const positiveDecimal = Joi.alternatives().try(
     }, 'positive decimal string')
 );
 
+const optionalNonNegativeNumber = Joi.alternatives().try(
+    Joi.number().min(0),
+    Joi.string().empty('').default(0)
+).messages({
+    'alternatives.match': '{{#label}} must be a number',
+    'number.base': '{{#label}} must be a number',
+    'number.min': '{{#label}} must be >= 0',
+});
+
 const adminProductFields = {
     name: Joi.string().trim().min(2).max(200),
     description: Joi.string().trim().allow('', null),
     basePrice: positiveDecimal.required(),
-    costPrice: Joi.number().min(0),
+    costPrice: optionalNonNegativeNumber,
     minQty: Joi.number().integer().min(1).required(),
     maxQty: Joi.number().integer().min(1).required(),
     category: Joi.string().trim().allow('', null),

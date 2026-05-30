@@ -38,6 +38,8 @@ const validateDynamicFields = (fields = []) => {
     return true;
 };
 
+const emptyStringToZero = (value) => (value === '' ? 0 : value);
+
 // ─── User-facing / shared validation ─────────────────────────────────────────
 
 const productIdParam = [
@@ -66,6 +68,7 @@ const createProductValidation = [
         .custom((v) => isPositiveDecimalString(v)).withMessage('basePrice must be > 0'),
 
     body('costPrice')
+        .customSanitizer(emptyStringToZero)
         .optional()
         .isFloat({ min: 0 }).withMessage('costPrice must be >= 0'),
 
@@ -199,6 +202,7 @@ const publishProductValidation = [
         .custom((v) => v == null || isPositiveDecimalString(v)).withMessage('basePrice must be > 0, if provided'),
 
     body('costPrice')
+        .customSanitizer(emptyStringToZero)
         .optional()
         .isFloat({ min: 0 }).withMessage('costPrice must be >= 0'),
 
@@ -304,6 +308,7 @@ const updateProductValidation = [
         .custom((v) => v == null || isPositiveDecimalString(v)).withMessage('basePrice must be > 0'),
 
     body('costPrice')
+        .customSanitizer(emptyStringToZero)
         .optional()
         .isFloat({ min: 0 }).withMessage('costPrice must be >= 0'),
 
