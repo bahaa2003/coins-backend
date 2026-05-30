@@ -90,6 +90,10 @@ const registry = new Map([
     ['dealer api', DealerApiAdapter],
     ['dealerapi', DealerApiAdapter],
     ['dealer', DealerApiAdapter],
+    ['karak', DealerApiAdapter],
+    ['karak-chat', DealerApiAdapter],
+    ['karak chat', DealerApiAdapter],
+    ['karakchat', DealerApiAdapter],
 
     // ── Default test / dev adapter ────────────────────────────────────────────
     ['mock', MockProviderAdapter],

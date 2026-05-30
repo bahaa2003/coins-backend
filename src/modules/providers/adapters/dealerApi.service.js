@@ -6,10 +6,45 @@ const { BaseProviderAdapter } = require('./base.adapter');
 const DEFAULT_TIMEOUT_MS = 180_000;
 const PROVIDER_NAME = 'DealerApi';
 const SUCCESS_CODE = '200';
+const KARAK_DYNAMIC_PRODUCT_ID = 'karak_dynamic_coins';
+const KARAK_DYNAMIC_PRODUCT = Object.freeze({
+    id: KARAK_DYNAMIC_PRODUCT_ID,
+    name: 'Karak Dynamic Coins (Any Amount)',
+    price: 0,
+    minQty: 1,
+    maxQty: 5000000,
+    currency: 'USD',
+});
+const KARAK_PROVIDER_KEYS = new Set(['karak', 'karak-chat', 'karak chat', 'karakchat']);
 
 const ERROR_MESSAGES = Object.freeze({
     131: 'Dealer API rejected the request. Check secretKey and request parameters.',
     138: 'Dealer API rejected the sale. Check target user ID, coin amount, and account balance.',
+});
+
+const normalizeProviderKey = (value) => String(value ?? '').toLowerCase().trim();
+
+const compactProviderKey = (value) => normalizeProviderKey(value).replace(/[^a-z0-9]/g, '');
+
+const isKarakProvider = (provider = {}) => {
+    const candidates = [provider.code, provider.slug, provider.name, provider.providerCode];
+
+    return candidates.some((value) => {
+        const normalized = normalizeProviderKey(value);
+        const compact = compactProviderKey(value);
+        return KARAK_PROVIDER_KEYS.has(normalized) || KARAK_PROVIDER_KEYS.has(compact);
+    });
+};
+
+const buildKarakDynamicProductDto = () => ({
+    ...KARAK_DYNAMIC_PRODUCT,
+    externalProductId: KARAK_DYNAMIC_PRODUCT.id,
+    rawName: KARAK_DYNAMIC_PRODUCT.name,
+    rawPrice: String(KARAK_DYNAMIC_PRODUCT.price),
+    minQty: KARAK_DYNAMIC_PRODUCT.minQty,
+    maxQty: KARAK_DYNAMIC_PRODUCT.maxQty,
+    isActive: true,
+    rawPayload: { ...KARAK_DYNAMIC_PRODUCT },
 });
 
 class DealerApiError extends Error {
@@ -81,7 +116,10 @@ class DealerApiAdapter extends BaseProviderAdapter {
         super(provider, options);
 
         const baseUrl = options.baseUrl || provider.baseUrl;
-        const secretKey = options.secretKey || this._resolveToken();
+        const secretKey = options.secretKey
+            || this._resolveToken()
+            || provider.secretKey
+            || provider.secret;
 
         if (!baseUrl) throw new Error(`[${PROVIDER_NAME}] provider.baseUrl is required`);
         if (!secretKey) throw new Error(`[${PROVIDER_NAME}] secretKey (apiToken / apiKey) is required`);
@@ -157,17 +195,25 @@ class DealerApiAdapter extends BaseProviderAdapter {
     async processSale(params = {}) {
         const userId = params.userId ?? params.toUserId ?? params.playerId;
         const coins = params.coins ?? params.amount ?? params.quantity;
+        const toUserId = Number(userId);
+        const coinAmount = Number(coins);
 
         if (!userId) throw new Error(`[${PROVIDER_NAME}] userId is required`);
-        if (!Number.isFinite(Number(coins)) || Number(coins) <= 0) {
+        if (!Number.isFinite(toUserId) || toUserId <= 0) {
+            throw new Error(`[${PROVIDER_NAME}] toUserId must be a positive number`);
+        }
+        if (!Number.isFinite(coinAmount) || coinAmount <= 0) {
             throw new Error(`[${PROVIDER_NAME}] coins must be a positive number`);
         }
 
         const { data } = await this._client.post('/dealer/sale', null, {
             params: {
                 secretKey: this.secretKey,
-                toUserId: userId,
-                coins,
+                toUserId,
+                coins: coinAmount,
+            },
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
             },
         });
 
@@ -181,10 +227,25 @@ class DealerApiAdapter extends BaseProviderAdapter {
 
     async placeOrder(params = {}) {
         try {
-            const sale = await this.processSale({
-                userId: params.userId ?? params.toUserId ?? params.playerId,
-                coins: params.coins ?? params.amount ?? params.quantity,
-            });
+            const providerProductId = params.providerProductId ?? params.externalProductId ?? params.productId;
+            const isKarakDynamicProduct = String(providerProductId || '').trim() === KARAK_DYNAMIC_PRODUCT_ID;
+            const saleParams = isKarakDynamicProduct
+                ? {
+                    toUserId: params.toUserId
+                        ?? params.userId
+                        ?? params.playerId
+                        ?? params.player_id
+                        ?? params.uid
+                        ?? params.accountId
+                        ?? params.account_id,
+                    coins: Number(params.quantity),
+                }
+                : {
+                    userId: params.userId ?? params.toUserId ?? params.playerId,
+                    coins: params.coins ?? params.amount ?? params.quantity,
+                };
+
+            const sale = await this.processSale(saleParams);
 
             return {
                 success: true,
@@ -235,6 +296,10 @@ class DealerApiAdapter extends BaseProviderAdapter {
     }
 
     async getProducts() {
+        if (isKarakProvider(this.provider)) {
+            return [buildKarakDynamicProductDto()];
+        }
+
         return [];
     }
 
@@ -260,4 +325,6 @@ class DealerApiAdapter extends BaseProviderAdapter {
 module.exports = {
     DealerApiAdapter,
     DealerApiError,
+    KARAK_DYNAMIC_PRODUCT_ID,
+    isKarakProvider,
 };

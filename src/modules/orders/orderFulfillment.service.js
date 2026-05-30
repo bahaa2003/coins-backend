@@ -281,6 +281,7 @@ const executeOrder = async (orderId, provider = null, auditContext = null) => {
     let result;
     try {
         result = await resolvedProvider.placeOrder({
+            providerProductId: externalProductId ?? String(order.productId._id),
             externalProductId: externalProductId ?? String(order.productId._id),
             quantity: order.quantity,
             ...mappedCustomerFields,   // ← spread translated customer fields onto params

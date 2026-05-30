@@ -54,6 +54,7 @@ afterEach(() => {
 const { TorosfonAdapter } = require('../modules/providers/adapters/toros.adapter');
 const { AlkasrVipAdapter } = require('../modules/providers/adapters/alkasr.adapter');
 const { RoyalCrownAdapter } = require('../modules/providers/adapters/royalCrown.adapter');
+const { DealerApiAdapter } = require('../modules/providers/adapters/dealerApi.service');
 const { getProviderAdapter, registerAdapter } = require('../modules/providers/adapters/adapter.factory');
 const { toInternalStatus, isTerminal, requiresRefund } = require('../modules/providers/statusMapper');
 
@@ -80,6 +81,13 @@ const royalProvider = {
     apiToken: 'royal-secret',
 };
 
+const karakProvider = {
+    name: 'Karak Chat',
+    slug: 'karak',
+    baseUrl: 'https://karak.example.com',
+    apiToken: 'karak-secret',
+};
+
 // Helper: build adapter with a controlled axios client
 const makeTorosAdapter = (clientOverrides = {}) => {
     const client = makeFakeAxios(clientOverrides);
@@ -93,6 +101,14 @@ const makeAlkasrAdapter = (clientOverrides = {}) => {
     const client = makeFakeAxios(clientOverrides);
     axios.create.mockReturnValueOnce(client);
     const adapter = new AlkasrVipAdapter(alkasrProvider);
+    adapter._client = client;
+    return { adapter, client };
+};
+
+const makeDealerAdapter = (provider = karakProvider, clientOverrides = {}) => {
+    const client = makeFakeAxios(clientOverrides);
+    axios.create.mockReturnValueOnce(client);
+    const adapter = new DealerApiAdapter(provider);
     adapter._client = client;
     return { adapter, client };
 };
@@ -487,6 +503,54 @@ describe('[6] AlkasrVipAdapter — checkOrder() / checkOrders()', () => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
+describe('DealerApiAdapter - Karak dynamic coins', () => {
+    it('returns the mocked dynamic coins product for Karak without an HTTP catalog request', async () => {
+        const { adapter, client } = makeDealerAdapter();
+
+        const products = await adapter.getProducts();
+
+        expect(products).toEqual([expect.objectContaining({
+            externalProductId: 'karak_dynamic_coins',
+            rawName: 'Karak Dynamic Coins (Any Amount)',
+            rawPrice: '0',
+            minQty: 1,
+            maxQty: 5000000,
+            isActive: true,
+            rawPayload: expect.objectContaining({
+                id: 'karak_dynamic_coins',
+                name: 'Karak Dynamic Coins (Any Amount)',
+                price: 0,
+                currency: 'USD',
+            }),
+        })]);
+        expect(client.get).not.toHaveBeenCalled();
+    });
+
+    it('maps the dynamic product quantity to sale coins and sends query params', async () => {
+        const { adapter, client } = makeDealerAdapter();
+        client.post.mockResolvedValueOnce({ data: { code: '200', data: { saleId: 'S-1' } } });
+
+        const result = await adapter.placeOrder({
+            providerProductId: 'karak_dynamic_coins',
+            quantity: '2500',
+            playerId: '123456',
+            referenceId: 'ORDER-1',
+        });
+
+        expect(result.success).toBe(true);
+        expect(client.post).toHaveBeenCalledWith('/dealer/sale', null, {
+            params: {
+                secretKey: 'karak-secret',
+                toUserId: 123456,
+                coins: 2500,
+            },
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+        });
+    });
+});
+
 // [7] statusMapper — full vocabulary (Toros + Alkasr + canonical)
 // ═════════════════════════════════════════════════════════════════════════════
 
@@ -625,6 +689,14 @@ describe('[8] adapter.factory — resolution', () => {
             baseUrl: 'https://x.com', apiToken: 'tok',
         });
         expect(adapter).toBeInstanceOf(RoyalCrownAdapter);
+    });
+
+    it('resolves DealerApiAdapter by Karak slug', () => {
+        const adapter = getProviderAdapter({
+            slug: 'karak', name: 'Karak Chat',
+            baseUrl: 'https://x.com', apiToken: 'tok',
+        });
+        expect(adapter).toBeInstanceOf(DealerApiAdapter);
     });
 
     it('falls back to MockProviderAdapter for unknown slug (non-strict)', () => {
