@@ -512,14 +512,17 @@ describe('DealerApiAdapter - Karak dynamic coins', () => {
         expect(products).toEqual([expect.objectContaining({
             externalProductId: 'karak_dynamic_coins',
             rawName: 'Karak Dynamic Coins (Any Amount)',
-            rawPrice: '0',
+            rawPrice: 0.00001,
+            price: 0.00001,
+            costPrice: 0.00001,
             minQty: 1,
             maxQty: 5000000,
             isActive: true,
             rawPayload: expect.objectContaining({
                 id: 'karak_dynamic_coins',
                 name: 'Karak Dynamic Coins (Any Amount)',
-                price: 0,
+                price: 0.00001,
+                product_price: 0.00001,
                 currency: 'USD',
             }),
         })]);

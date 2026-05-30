@@ -15,7 +15,90 @@
  */
 
 const { ProviderProduct } = require('./providerProduct.model');
+const { Provider } = require('./provider.model');
 const { NotFoundError } = require('../../shared/errors/AppError');
+const {
+    KARAK_DYNAMIC_PRODUCT_ID,
+    KARAK_DYNAMIC_PRODUCT,
+    buildKarakDynamicProductDto,
+    isKarakProvider,
+} = require('./adapters/dealerApi.service');
+
+const toPlainObject = (value) => {
+    if (!value) return value;
+    if (typeof value.toObject === 'function') {
+        return value.toObject({ getters: false, virtuals: false });
+    }
+    return { ...value };
+};
+
+const isKarakDynamicProduct = (product) => (
+    String(product?.externalProductId || '').trim() === KARAK_DYNAMIC_PRODUCT_ID
+);
+
+const normalizeKarakDynamicProduct = (product) => {
+    const plain = toPlainObject(product);
+    if (!isKarakDynamicProduct(plain)) return plain;
+
+    const price = Number(KARAK_DYNAMIC_PRODUCT.price);
+
+    return {
+        ...plain,
+        id: plain.id ?? plain._id,
+        externalProductId: KARAK_DYNAMIC_PRODUCT.id,
+        rawName: KARAK_DYNAMIC_PRODUCT.name,
+        rawPrice: price,
+        price,
+        costPrice: price,
+        providerPrice: price,
+        minQty: KARAK_DYNAMIC_PRODUCT.minQty,
+        maxQty: KARAK_DYNAMIC_PRODUCT.maxQty,
+        isActive: true,
+        rawPayload: {
+            ...(plain.rawPayload || {}),
+            ...KARAK_DYNAMIC_PRODUCT,
+            product_id: KARAK_DYNAMIC_PRODUCT.id,
+            product_name: KARAK_DYNAMIC_PRODUCT.name,
+            product_price: price,
+        },
+    };
+};
+
+const ensureKarakDynamicProduct = async (providerId) => {
+    if (!providerId) return null;
+
+    const provider = await Provider.findById(providerId)
+        .select('name slug isActive')
+        .lean();
+
+    if (!provider || !isKarakProvider(provider)) return null;
+
+    const dto = buildKarakDynamicProductDto();
+    const now = new Date();
+
+    return ProviderProduct.findOneAndUpdate(
+        {
+            provider: provider._id,
+            externalProductId: KARAK_DYNAMIC_PRODUCT_ID,
+        },
+        {
+            $set: {
+                rawName: dto.rawName,
+                rawPrice: dto.rawPrice,
+                minQty: dto.minQty,
+                maxQty: dto.maxQty,
+                isActive: true,
+                rawPayload: dto.rawPayload,
+                lastSyncedAt: now,
+            },
+        },
+        {
+            upsert: true,
+            new: true,
+            setDefaultsOnInsert: true,
+        }
+    );
+};
 
 // =============================================================================
 // LIST / SEARCH
@@ -36,6 +119,10 @@ const { NotFoundError } = require('../../shared/errors/AppError');
 const listProviderProducts = async (filter = {}, { page = 1, limit = 500, search } = {}) => {
     const query = { ...filter };
 
+    if (query.provider) {
+        await ensureKarakDynamicProduct(query.provider);
+    }
+
     if (search) {
         const re = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
         query.$or = [{ rawName: re }, { translatedName: re }];
@@ -53,7 +140,7 @@ const listProviderProducts = async (filter = {}, { page = 1, limit = 500, search
     ]);
 
     return {
-        products,
+        products: products.map(normalizeKarakDynamicProduct),
         pagination: {
             page,
             limit,
@@ -74,7 +161,7 @@ const listProviderProducts = async (filter = {}, { page = 1, limit = 500, search
 const getProviderProductById = async (id) => {
     const pp = await ProviderProduct.findById(id).populate('provider', 'name slug isActive');
     if (!pp) throw new NotFoundError('ProviderProduct');
-    return pp;
+    return normalizeKarakDynamicProduct(pp);
 };
 
 // =============================================================================
@@ -103,4 +190,6 @@ module.exports = {
     listProviderProducts,
     getProviderProductById,
     setTranslatedName,
+    ensureKarakDynamicProduct,
+    normalizeKarakDynamicProduct,
 };

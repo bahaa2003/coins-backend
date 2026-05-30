@@ -41,10 +41,17 @@ const buildKarakDynamicProductDto = () => ({
     externalProductId: KARAK_DYNAMIC_PRODUCT.id,
     rawName: KARAK_DYNAMIC_PRODUCT.name,
     rawPrice: KARAK_DYNAMIC_PRODUCT.price,
+    costPrice: KARAK_DYNAMIC_PRODUCT.price,
+    providerPrice: KARAK_DYNAMIC_PRODUCT.price,
     minQty: KARAK_DYNAMIC_PRODUCT.minQty,
     maxQty: KARAK_DYNAMIC_PRODUCT.maxQty,
     isActive: true,
-    rawPayload: { ...KARAK_DYNAMIC_PRODUCT },
+    rawPayload: {
+        ...KARAK_DYNAMIC_PRODUCT,
+        product_id: KARAK_DYNAMIC_PRODUCT.id,
+        product_name: KARAK_DYNAMIC_PRODUCT.name,
+        product_price: KARAK_DYNAMIC_PRODUCT.price,
+    },
 });
 
 class DealerApiError extends Error {
@@ -326,5 +333,7 @@ module.exports = {
     DealerApiAdapter,
     DealerApiError,
     KARAK_DYNAMIC_PRODUCT_ID,
+    KARAK_DYNAMIC_PRODUCT,
+    buildKarakDynamicProductDto,
     isKarakProvider,
 };

@@ -100,13 +100,24 @@ const getProviderProduct = catchAsync(async (req, res) => {
  */
 const getProviderProductPrice = catchAsync(async (req, res) => {
     const pp = await ppService.getProviderProductById(req.params.id);
-    // Prefer rawPayload.product_price (original provider precision) over
-    // rawPrice which may have been truncated by older adapter logic.
-    const rawPrice = String(pp.rawPayload?.product_price ?? pp.rawPrice ?? '0');
+    // Prefer rawPayload.product_price (original provider precision) over rawPrice.
+    // Karak's dynamic product is serialized by providerProduct.service with a
+    // numeric product_price so stale DB strings never leak back to the admin UI.
+    const rawPriceValue = pp.rawPayload?.product_price ?? pp.rawPrice ?? 0;
+    const parsedRawPrice = Number(rawPriceValue);
+    const rawPrice = Number.isFinite(parsedRawPrice) ? parsedRawPrice : rawPriceValue;
+    const providerId = pp.provider?._id?.toString?.()
+        ?? pp.provider?.toString?.()
+        ?? '';
+
     sendSuccess(res, {
         rawPrice,
+        price: rawPrice,
+        costPrice: rawPrice,
         rawName: pp.rawName || pp.rawPayload?.product_name || '',
-        provider: pp.provider?.toString() || '',
+        minQty: pp.minQty ?? null,
+        maxQty: pp.maxQty ?? null,
+        provider: providerId,
         found: true,
     }, 'Provider product price retrieved.');
 });
