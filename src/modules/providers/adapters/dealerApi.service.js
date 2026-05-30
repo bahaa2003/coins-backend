@@ -40,7 +40,7 @@ const buildKarakDynamicProductDto = () => ({
     ...KARAK_DYNAMIC_PRODUCT,
     externalProductId: KARAK_DYNAMIC_PRODUCT.id,
     rawName: KARAK_DYNAMIC_PRODUCT.name,
-    rawPrice: String(KARAK_DYNAMIC_PRODUCT.price),
+    rawPrice: KARAK_DYNAMIC_PRODUCT.price,
     minQty: KARAK_DYNAMIC_PRODUCT.minQty,
     maxQty: KARAK_DYNAMIC_PRODUCT.maxQty,
     isActive: true,
