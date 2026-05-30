@@ -10,7 +10,7 @@ const KARAK_DYNAMIC_PRODUCT_ID = 'karak_dynamic_coins';
 const KARAK_DYNAMIC_PRODUCT = Object.freeze({
     id: KARAK_DYNAMIC_PRODUCT_ID,
     name: 'Karak Dynamic Coins (Any Amount)',
-    price: 0,
+    price: 0.00001,
     minQty: 1,
     maxQty: 5000000,
     currency: 'USD',
