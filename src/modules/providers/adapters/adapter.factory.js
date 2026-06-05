@@ -80,6 +80,22 @@ const registry = new Map([
     ['mlook alarab', AlkasrVipAdapter], // name
     ['mlookalarab', AlkasrVipAdapter],  // compact
 
+    // ── Alshaikh Store (Uses Alkasr Adapter) ─────────────────────────────────────
+    ['alshaikh-store', AlkasrVipAdapter], // slug
+    ['alshaikh store', AlkasrVipAdapter], // name
+    ['alshaikhstore', AlkasrVipAdapter],  // compact
+
+    // ── golden xcoin (Uses Alkasr Adapter) ─────────────────────────────────────
+    ['golden-xcoin', AlkasrVipAdapter], // slug
+    ['golden xcoin', AlkasrVipAdapter], // name
+    ['goldenxcoin', AlkasrVipAdapter],  // compact
+
+    // ── yassen card (Uses Alkasr Adapter) ─────────────────────────────────────
+    ['yassen-card', AlkasrVipAdapter], // slug
+    ['yassen card', AlkasrVipAdapter], // name
+    ['yassencard', AlkasrVipAdapter],  // compact
+
+
     // -- Ibra Store ------------------------------------------------------------
     ['ibra-store', IbraAdapter],
     ['ibrastore', IbraAdapter],
