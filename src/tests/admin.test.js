@@ -63,6 +63,30 @@ describe('[1] Admin Users Service', () => {
         expect(typeof result.pagination.total).toBe('number');
     });
 
+    it('listUsers sorts by walletBalance desc', async () => {
+        const group = await createGroup({ name: 'Balance Sort', percentage: 0 });
+        const lowBalance = await createCustomer({
+            groupId: group._id,
+            name: 'Low Balance',
+            walletBalance: 25,
+        });
+        const highBalance = await createCustomer({
+            groupId: group._id,
+            name: 'High Balance',
+            walletBalance: 250,
+        });
+
+        const result = await adminUsersService.listUsers({
+            page: 1,
+            limit: 10,
+            sortBy: 'walletBalance',
+            sortOrder: 'desc',
+        });
+        const ids = result.users.map((user) => user._id.toString());
+
+        expect(ids.indexOf(highBalance._id.toString())).toBeLessThan(ids.indexOf(lowBalance._id.toString()));
+    });
+
     it('listUsers filters by status=PENDING', async () => {
         const { group, admin } = await setup();
         const pending = await createCustomer({
@@ -397,5 +421,25 @@ describe('[4] Joi Validation Schemas', () => {
         expect(runBodyValidation(schemas.updateSetting, { value: false })).toBeNull();
         expect(runBodyValidation(schemas.updateSetting, { value: 42 })).toBeNull();
         expect(runBodyValidation(schemas.updateSetting, { value: 'text' })).toBeNull();
+    });
+
+    it('listUsersQuery: accepts admin users sort fields and limit 500', () => {
+        const allowedSortFields = ['createdAt', 'walletBalance', 'name', 'email', 'status', 'role'];
+
+        allowedSortFields.forEach((sortBy) => {
+            const { error, value } = schemas.listUsersQuery.validate({
+                page: '1',
+                limit: '500',
+                sortBy,
+                sortOrder: 'desc',
+            }, {
+                abortEarly: false,
+                stripUnknown: true,
+                convert: true,
+            });
+
+            expect(error).toBeUndefined();
+            expect(value).toMatchObject({ page: 1, limit: 500, sortBy, sortOrder: 'desc' });
+        });
     });
 });

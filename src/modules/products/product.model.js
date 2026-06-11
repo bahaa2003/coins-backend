@@ -2,6 +2,7 @@
 
 const mongoose = require('mongoose');
 const { computeMarkup, isPositive } = require('../../shared/utils/decimalPrecision');
+const { getNextSequence } = require('../orders/counter.model');
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -55,6 +56,13 @@ const productSchema = new mongoose.Schema(
             trim: true,
             minlength: [2, 'Product name must be at least 2 characters'],
             maxlength: [200, 'Product name cannot exceed 200 characters'],
+        },
+
+        compatProductId: {
+            type: Number,
+            unique: true,
+            sparse: true,
+            index: true,
         },
 
         description: {
@@ -464,6 +472,17 @@ productSchema.index({ providerProduct: 1 });               // price-sync: find P
 productSchema.index({ pricingMode: 1, provider: 1 });     // price-sync: find 'sync' mode candidates
 productSchema.index({ isActive: 1, displayOrder: 1 });    // user-facing product list
 productSchema.index({ deletedAt: 1 }, { sparse: true });   // fast filter for non-deleted products
+
+productSchema.pre('save', async function (next) {
+    try {
+        if (this.isNew && !this.compatProductId) {
+            this.compatProductId = await getNextSequence('compatProductId', 999);
+        }
+        next();
+    } catch (err) {
+        next(err);
+    }
+});
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

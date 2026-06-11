@@ -7,11 +7,37 @@ const normalizeIp = (value) => String(value || '')
     .trim()
     .replace(/^::ffff:/, '');
 
-const sendAuthError = (res, statusCode, message, code) => res.status(statusCode).json({
-    success: false,
-    message,
-    code,
-});
+const COMPAT_AUTH_ERROR_CODES = {
+    RESELLER_TOKEN_REQUIRED: 120,
+    RESELLER_TOKEN_INVALID: 121,
+    RESELLER_NOT_ALLOWED: 122,
+    RESELLER_IP_FORBIDDEN: 123,
+    RESELLER_AUTH_FAILED: 121,
+};
+
+const COMPAT_AUTH_ERROR_MESSAGES = {
+    RESELLER_TOKEN_REQUIRED: 'API Token is required',
+    RESELLER_TOKEN_INVALID: 'Token error',
+    RESELLER_NOT_ALLOWED: 'Not allowed to use API',
+    RESELLER_IP_FORBIDDEN: 'IP not allowed',
+    RESELLER_AUTH_FAILED: 'Token error',
+};
+
+const sendAuthError = (req, res, statusCode, message, code) => {
+    if (req.clientCompatErrorFormat) {
+        return res.status(statusCode).json({
+            status: 'ERROR',
+            code: COMPAT_AUTH_ERROR_CODES[code] || 121,
+            message: COMPAT_AUTH_ERROR_MESSAGES[code] || message,
+        });
+    }
+
+    return res.status(statusCode).json({
+        success: false,
+        message,
+        code,
+    });
+};
 
 const extractApiToken = (req) => {
     const headerToken = req.get('x-api-key') || req.get('api-token');
@@ -29,15 +55,22 @@ const resellerAuth = async (req, res, next) => {
     try {
         const token = extractApiToken(req);
         if (!token) {
-            return sendAuthError(res, 401, 'Missing API token.', 'RESELLER_TOKEN_REQUIRED');
+            return sendAuthError(req, res, 401, 'Missing API token.', 'RESELLER_TOKEN_REQUIRED');
         }
 
-        const candidates = await User.find({
-            isApiEnabled: true,
-            status: USER_STATUS.ACTIVE,
-            apiToken: { $exists: true, $ne: null },
-            deletedAt: null,
-        })
+        const candidateFilter = req.clientCompatErrorFormat
+            ? {
+                apiToken: { $exists: true, $ne: null },
+                deletedAt: null,
+            }
+            : {
+                isApiEnabled: true,
+                status: USER_STATUS.ACTIVE,
+                apiToken: { $exists: true, $ne: null },
+                deletedAt: null,
+            };
+
+        const candidates = await User.find(candidateFilter)
             .select('+apiToken +apiSecret name email role status walletBalance creditLimit creditUsed currency groupId isApiEnabled whitelistIps webhookUrl')
             .populate('groupId', 'name percentage isActive billingMode');
 
@@ -50,7 +83,11 @@ const resellerAuth = async (req, res, next) => {
         }
 
         if (!reseller) {
-            return sendAuthError(res, 401, 'Invalid API token.', 'RESELLER_TOKEN_INVALID');
+            return sendAuthError(req, res, 401, 'Invalid API token.', 'RESELLER_TOKEN_INVALID');
+        }
+
+        if (reseller.status !== USER_STATUS.ACTIVE || reseller.isApiEnabled !== true) {
+            return sendAuthError(req, res, 403, 'Not allowed to use API.', 'RESELLER_NOT_ALLOWED');
         }
 
         const whitelist = (Array.isArray(reseller.whitelistIps) ? reseller.whitelistIps : [])
@@ -59,7 +96,7 @@ const resellerAuth = async (req, res, next) => {
         const requestIp = normalizeIp(req.ip || req.socket?.remoteAddress || req.get('x-forwarded-for'));
 
         if (whitelist.length > 0 && !whitelist.includes(requestIp)) {
-            return sendAuthError(res, 403, 'Request IP is not whitelisted.', 'RESELLER_IP_FORBIDDEN');
+            return sendAuthError(req, res, 403, 'Request IP is not whitelisted.', 'RESELLER_IP_FORBIDDEN');
         }
 
         req.reseller = reseller;
@@ -73,7 +110,7 @@ const resellerAuth = async (req, res, next) => {
 
         return next();
     } catch (err) {
-        return sendAuthError(res, 401, err.message || 'API authentication failed.', 'RESELLER_AUTH_FAILED');
+        return sendAuthError(req, res, 401, err.message || 'API authentication failed.', 'RESELLER_AUTH_FAILED');
     }
 };
 

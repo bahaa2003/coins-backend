@@ -28,6 +28,8 @@ const _findOrFail = async (id) => {
     return user;
 };
 
+const USER_LIST_SORT_FIELDS = new Set(['createdAt', 'walletBalance', 'name', 'email', 'status', 'role']);
+
 // ─── List ──────────────────────────────────────────────────────────────────────
 
 /**
@@ -56,7 +58,7 @@ const listUsers = async ({
     to,
     page = 1,
     limit = 20,
-    sortBy = 'walletBalance',
+    sortBy = 'createdAt',
     sortOrder = 'desc',
 } = {}) => {
     const normalizedPage = Number.isFinite(Number(page)) && Number(page) > 0
@@ -65,9 +67,10 @@ const listUsers = async ({
     const requestedLimit = Number.isFinite(Number(limit)) && Number(limit) > 0
         ? Math.floor(Number(limit))
         : 20;
-    const normalizedLimit = Math.min(requestedLimit, 20); // strict max for admin users page
+    const normalizedLimit = Math.min(requestedLimit, 500);
     const skip = (normalizedPage - 1) * normalizedLimit;
-    const normalizedSortBy = typeof sortBy === 'string' && sortBy.trim() ? sortBy.trim() : 'walletBalance';
+    const requestedSortBy = typeof sortBy === 'string' && sortBy.trim() ? sortBy.trim() : 'createdAt';
+    const normalizedSortBy = USER_LIST_SORT_FIELDS.has(requestedSortBy) ? requestedSortBy : 'createdAt';
     const normalizedSortOrder = String(sortOrder || '').trim().toLowerCase() === 'asc' ? 'asc' : 'desc';
 
     const filter = { deletedAt: null, verified: true };
@@ -91,9 +94,7 @@ const listUsers = async ({
         if (to) filter.createdAt.$lte = new Date(to);
     }
 
-    const sort = normalizedSortBy === 'walletBalance'
-        ? { walletBalance: normalizedSortOrder === 'asc' ? 1 : -1 }
-        : { [normalizedSortBy]: normalizedSortOrder === 'asc' ? 1 : -1 };
+    const sort = { [normalizedSortBy]: normalizedSortOrder === 'asc' ? 1 : -1 };
 
     const [users, total] = await Promise.all([
         User.find(filter)

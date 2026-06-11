@@ -82,6 +82,7 @@ const updateUserSchema = Joi.object({
 
 const listUsersQuery = Joi.object({
     ...pagination,
+    limit: Joi.number().integer().min(1).max(500).default(20),
     status: Joi.string().valid('PENDING', 'ACTIVE', 'REJECTED'),
     verified: Joi.boolean(),
     email: Joi.string().max(128),
@@ -89,7 +90,7 @@ const listUsersQuery = Joi.object({
     role: Joi.string().valid('ADMIN', 'SUPERVISOR', 'CUSTOMER'),
     from: Joi.date().iso(),
     to: Joi.date().iso().min(Joi.ref('from')),
-    sortBy: Joi.string().valid('createdAt', 'email', 'name', 'status', 'walletBalance').default('createdAt'),
+    sortBy: Joi.string().valid('createdAt', 'walletBalance', 'name', 'email', 'status', 'role').default('createdAt'),
     sortOrder: Joi.string().valid('asc', 'desc').default('desc'),
 });
 

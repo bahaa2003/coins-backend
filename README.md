@@ -65,6 +65,7 @@ Backend/
       orders/                 Orders, pricing, fulfillment, polling
       products/               Customer-facing products
       providers/              Provider records, adapters, sync
+      reseller/               Reseller/client-compatible APIs
       targets/                Target apps and target orders
       users/                  User management
       wallet/                 Wallet and credit operations
@@ -95,13 +96,32 @@ Tests use `mongodb-memory-server`.
 
 ## Setup
 
+From the repository root, enter the backend project:
+
+```bash
+cd Backend
+```
+
 Install dependencies:
 
 ```bash
 npm install
 ```
 
-Create `Backend/.env`:
+Create your local environment file from the sample, then edit it with real
+values:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+On macOS/Linux:
+
+```bash
+cp .env.example .env
+```
+
+Minimum required values:
 
 ```env
 NODE_ENV=development
@@ -111,40 +131,79 @@ MONGO_URI=mongodb://localhost:27017/coins
 JWT_SECRET=change_me_to_a_long_random_secret
 JWT_EXPIRES_IN=7d
 BCRYPT_ROUNDS=12
+```
 
+Common optional values:
+
+```env
+# Frontend, email links, and CORS
 FRONTEND_URL=http://localhost:3000
 FRONTEND_VERIFY_REDIRECT_URL=http://localhost:3000/email-verified
 APP_URL=http://localhost:5000
 ALLOWED_ORIGINS=http://localhost:3000
 
+# SMTP / email verification / 2FA email
 SMTP_HOST=smtp.mailtrap.io
 SMTP_PORT=587
 SMTP_USER=
 SMTP_PASS=
 EMAIL_FROM=noreply@platform.com
 
+# Google OAuth
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
 GOOGLE_CALLBACK_URL=http://localhost:5000/api/auth/google/callback
 
+# Exchange-rate sync
 EXCHANGE_RATE_API_URL=https://api.exchangerate.host/latest?base=USD
 EXCHANGE_RATE_API_KEY=
 EXCHANGE_RATE_TIMEOUT_MS=10000
 
+# Order/provider runtime tuning
+ORDER_CREATION_TRANSACTIONS=
+POLL_BATCH_LIMIT=100
+POLL_MAX_BATCH_SIZE=50
+POLL_MAX_CONCURRENT=3
+POLL_INTER_BATCH_DELAY_MS=0
+SYNC_UPSERT_CONCURRENCY=10
+PROVIDER_PRICE_CACHE_TTL_MS=300000
+
+# Legacy Royal Crown shim fallback only; provider records normally carry credentials
+PROVIDER_BASE_URL=
+PROVIDER_API_TOKEN=
+
+# Deposit receipt analyzer
 RECEIPT_ANALYZER_ENABLE_OCR=false
 RECEIPT_ANALYZER_MIN_ENTROPY=1.0
+RECEIPT_ANALYZER_BLACK_MEAN_MAX=8
+RECEIPT_ANALYZER_WHITE_MEAN_MIN=247
+RECEIPT_ANALYZER_SOLID_STDDEV_MAX=2.5
+RECEIPT_ANALYZER_LOW_ENTROPY_STDDEV_MAX=3.2
+RECEIPT_ANALYZER_MAX_INPUT_PIXELS=40000000
 RECEIPT_ANALYZER_OCR_TIMEOUT_MS=3500
+RECEIPT_ANALYZER_OCR_RESIZE_WIDTH=1200
+RECEIPT_ANALYZER_OCR_MIN_KEYWORD_MATCHES=1
 RECEIPT_ANALYZER_OCR_KEYWORDS=vodafone,cash,transfer,success
 
+# WhatsApp admin notifications
 ADMIN_NOTIFICATION_NUMBER=
 WHATSAPP_CLIENT_ID=admin-notifications
 WHATSAPP_AUTH_DATA_PATH=
+WHATSAPP_CACHE_DATA_PATH=
 WHATSAPP_RECONNECT_DELAY_MS=5000
 ```
 
 Required variables are `MONGO_URI` and `JWT_SECRET`. Most integrations are
 optional, but production must set `ALLOWED_ORIGINS` to a comma-separated list of
 trusted frontend origins.
+
+Set `ADMIN_NOTIFICATION_NUMBER` to the admin WhatsApp number in international
+digits only, without `+` or spaces, for example `201234567890`. WhatsApp auth
+and cache directories should be on persistent storage if notifications are used.
+
+Provider credentials are normally stored in provider records through the admin
+APIs (`baseUrl`, `apiToken`/`apiKey`). The `PROVIDER_BASE_URL` and
+`PROVIDER_API_TOKEN` variables exist only for the legacy Royal Crown shim.
 
 ## Running Locally
 
@@ -172,7 +231,8 @@ Clear and reseed data:
 npm run seed:clear
 ```
 
-The API runs on `http://localhost:5000` by default.
+The API listens on `PORT` from `.env`. If `PORT` is omitted, it falls back to
+`5000`.
 
 Health check:
 
@@ -216,6 +276,8 @@ Base prefix: `/api`
 | `/api/wallet` | Wallet APIs |
 | `/api/deposits` | Deposit APIs |
 | `/api/providers` | Provider APIs |
+| `/api/v1/reseller` | Reseller-compatible APIs |
+| `/api/client` | Alias for reseller-compatible APIs |
 | `/api/users` | User APIs |
 | `/api/groups` | Pricing group APIs |
 | `/api/audit` | Audit log APIs |
@@ -229,6 +291,8 @@ Base prefix: `/api`
 | `/api/upload` | Shared upload endpoints |
 
 See `docs/api-reference.md` for more endpoint detail.
+
+Uploaded files are served from `/uploads`.
 
 ## Core Runtime Flow
 
@@ -252,6 +316,18 @@ See `docs/api-reference.md` for more endpoint detail.
 | Provider sync | Every 6 hours | Sync active provider catalogs into provider products |
 
 Both jobs skip automatically in the test environment.
+
+Useful tuning variables:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `ORDER_CREATION_TRANSACTIONS` | auto | Force order creation MongoDB transactions on/off with `true` or `false`; auto enables them when topology supports sessions |
+| `POLL_BATCH_LIMIT` | `100` | Max processing orders loaded per polling run |
+| `POLL_MAX_BATCH_SIZE` | `50` | Max orders sent to one provider batch status call |
+| `POLL_MAX_CONCURRENT` | `3` | Max providers polled concurrently |
+| `POLL_INTER_BATCH_DELAY_MS` | `0` | Delay between provider sub-batches |
+| `SYNC_UPSERT_CONCURRENCY` | `10` | Concurrent provider-product upserts during sync |
+| `PROVIDER_PRICE_CACHE_TTL_MS` | `300000` | Live provider price cache TTL |
 
 ## Dynamic Order Fields
 
@@ -318,6 +394,10 @@ Production checklist:
 - Configure provider credentials through provider records/admin APIs.
 - Ensure the process has persistent storage for `uploads/` and WhatsApp auth
   data if those features are used.
+- Set `ADMIN_NOTIFICATION_NUMBER` if WhatsApp admin notifications should be
+  delivered.
+- If PM2 cluster mode is used, make sure cron jobs and WhatsApp notification
+  startup run in only one worker or are moved to a separate worker process.
 - Run behind HTTPS and a trusted reverse proxy.
 
 ## Error Format

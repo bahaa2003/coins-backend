@@ -31,6 +31,7 @@ const notificationRoutes = require('./modules/notifications/notification.routes'
 const currencyRoutes = require('./modules/currency/currency.routes');
 const whatsappRoutes = require('./modules/whatsapp/whatsapp.routes');
 const resellerRoutes = require('./modules/reseller/reseller.routes');
+const clientCompatRoutes = require('./modules/clientCompat/clientCompat.routes');
 const uploadRoutes = require('./shared/routes/upload.routes');
 const path = require('path');
 // Seed default settings on startup (idempotent, no-op if already seeded)
@@ -106,6 +107,8 @@ const API_PREFIX = '/api';
 // Apply general rate limiter to all API routes (500 req / 15 min per IP)
 app.use(API_PREFIX, apiLimiter);
 
+app.use('/client/api', apiLimiter, clientCompatRoutes);
+
 app.use(`${API_PREFIX}/auth`, authRoutes);
 app.use(`${API_PREFIX}/users`, userRoutes);
 app.use(`${API_PREFIX}/groups`, groupRoutes);
@@ -116,6 +119,7 @@ app.use(`${API_PREFIX}/audit`, auditRoutes);
 app.use(`${API_PREFIX}/deposits`, depositRoutes);
 app.use(`${API_PREFIX}/providers`, providerRoutes);
 app.use(`${API_PREFIX}/v1/reseller`, resellerRoutes);
+app.use(`${API_PREFIX}/client/api`, clientCompatRoutes);
 app.use(`${API_PREFIX}/client`, resellerRoutes);
 
 // ── User Panel ─────────────────────────────────────────────────────────────────

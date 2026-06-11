@@ -46,6 +46,14 @@ const orderSchema = new mongoose.Schema(
             index: true,
         },
 
+        compatOrderId: {
+            type: String,
+            trim: true,
+            unique: true,
+            sparse: true,
+            index: true,
+        },
+
         productId: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'Product',

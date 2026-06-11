@@ -1,6 +1,7 @@
 'use strict';
 
 const mongoose = require('mongoose');
+const { getNextSequence } = require('../orders/counter.model');
 
 /**
  * category.model.js
@@ -19,6 +20,13 @@ const categorySchema = new mongoose.Schema(
             trim: true,
             minlength: [1, 'Category name must be at least 1 character'],
             maxlength: [100, 'Category name cannot exceed 100 characters'],
+        },
+
+        compatCategoryId: {
+            type: Number,
+            unique: true,
+            sparse: true,
+            index: true,
         },
 
         /** Display name (Arabic). */
@@ -88,6 +96,17 @@ categorySchema.pre('save', function (next) {
             .replace(/^-+|-+$/g, '');                    // trim leading/trailing hyphens
     }
     next();
+});
+
+categorySchema.pre('save', async function (next) {
+    try {
+        if (this.isNew && !this.compatCategoryId) {
+            this.compatCategoryId = await getNextSequence('compatCategoryId', 1);
+        }
+        next();
+    } catch (err) {
+        next(err);
+    }
 });
 
 const Category = mongoose.model('Category', categorySchema);
