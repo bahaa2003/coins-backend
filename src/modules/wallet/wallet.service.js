@@ -4,6 +4,41 @@ const { User, USER_STATUS } = require('../users/user.model');
 const { WalletTransaction, TRANSACTION_TYPES } = require('./walletTransaction.model');
 const { NotFoundError, BusinessRuleError, InsufficientFundsError } = require('../../shared/errors/AppError');
 
+const safeRound = (value, decimals = 2) => {
+    const factor = Math.pow(10, decimals);
+    return Math.round((Number(value) || 0) * factor) / factor;
+};
+
+const recalculateCreditUsed = (walletBalance, creditLimit) => {
+    const balance = safeRound(walletBalance);
+    const limit = safeRound(Math.abs(Number(creditLimit) || 0));
+    if (balance >= 0 || limit <= 0) return 0;
+    return safeRound(Math.min(Math.abs(balance), limit));
+};
+
+const roundMoneyExpression = (expression) => ({ $round: [expression, 2] });
+
+const creditUsedExpressionForBalance = (balanceExpression) => ({
+    $round: [
+        {
+            $let: {
+                vars: {
+                    balance: roundMoneyExpression(balanceExpression),
+                    creditLimit: { $abs: { $ifNull: ['$creditLimit', 0] } },
+                },
+                in: {
+                    $cond: [
+                        { $lt: ['$$balance', 0] },
+                        { $min: [{ $abs: '$$balance' }, '$$creditLimit'] },
+                        0,
+                    ],
+                },
+            },
+        },
+        2,
+    ],
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // INTERNAL HELPER
 // ─────────────────────────────────────────────────────────────────────────────
@@ -88,7 +123,18 @@ const debitWalletAtomic = async ({ userId, amount, reference = null, description
                 ],
             },
         },
-        [{ $set: { walletBalance: { $subtract: ['$walletBalance', amount] } } }],
+        [
+            {
+                $set: {
+                    walletBalance: roundMoneyExpression({ $subtract: ['$walletBalance', amount] }),
+                },
+            },
+            {
+                $set: {
+                    creditUsed: creditUsedExpressionForBalance('$walletBalance'),
+                },
+            },
+        ],
         opts
     );
 
@@ -105,11 +151,11 @@ const debitWalletAtomic = async ({ userId, amount, reference = null, description
         throw new InsufficientFundsError(amount, available);
     }
 
-    // Calculate how much was drawn from wallet vs credit
     const oldBalance = Number(oldUser.walletBalance) || 0;
-    const newBalance = Number((oldBalance - amount).toFixed(2));
-    const walletPortion = Math.min(amount, Math.max(0, oldBalance)); // actual wallet funds used
-    const creditPortion = amount - walletPortion; // remainder came from credit line
+    const oldCreditUsed = recalculateCreditUsed(oldBalance, oldUser.creditLimit);
+    const newBalance = safeRound(oldBalance - amount);
+    const newCreditUsed = recalculateCreditUsed(newBalance, oldUser.creditLimit);
+    const creditPortion = safeRound(Math.max(0, newCreditUsed - oldCreditUsed));
 
     // ── Immutable wallet transaction record ───────────────────────────────────
     const transaction = await _createTransactionRecord({
@@ -156,11 +202,20 @@ const forcedDebitWallet = async ({ userId, amount, reference = null, description
     if (!user) throw new NotFoundError('User');
 
     const balanceBefore = Number(user.walletBalance) || 0;
-    const balanceAfter  = parseFloat((balanceBefore - amount).toFixed(2));
+    const balanceAfter  = safeRound(balanceBefore - amount);
+    const creditUsedAfter = recalculateCreditUsed(balanceAfter, user.creditLimit);
 
-    // $inc is unconditional — works even when balance is already negative
     const updateOpts = session ? { session } : {};
-    await User.updateOne({ _id: userId }, { $inc: { walletBalance: -amount } }, updateOpts);
+    await User.updateOne(
+        { _id: userId },
+        {
+            $set: {
+                walletBalance: balanceAfter,
+                creditUsed: creditUsedAfter,
+            },
+        },
+        updateOpts
+    );
 
     const transaction = await _createTransactionRecord({
         userId,
@@ -192,7 +247,9 @@ const refundWalletAtomic = async ({
     description = '',
     session,
 }) => {
-    const totalRefund = parseFloat((walletDeducted + creditUsedAmount).toFixed(2));
+    const refundAmount = safeRound(Number(walletDeducted || 0));
+    const legacyCreditOnlyRefund = refundAmount > 0 ? 0 : safeRound(Number(creditUsedAmount || 0));
+    const totalRefund = safeRound(refundAmount + legacyCreditOnlyRefund);
     if (totalRefund <= 0) {
         throw new BusinessRuleError('Refund amount must be greater than zero.', 'INVALID_AMOUNT');
     }
@@ -204,10 +261,12 @@ const refundWalletAtomic = async ({
         [
             {
                 $set: {
-                    walletBalance: { $add: ['$walletBalance', walletDeducted] },
-                    creditUsed: {
-                        $max: [0, { $subtract: ['$creditUsed', creditUsedAmount] }],
-                    },
+                    walletBalance: roundMoneyExpression({ $add: ['$walletBalance', totalRefund] }),
+                },
+            },
+            {
+                $set: {
+                    creditUsed: creditUsedExpressionForBalance('$walletBalance'),
                 },
             },
         ],
@@ -221,9 +280,9 @@ const refundWalletAtomic = async ({
     const transaction = await _createTransactionRecord({
         userId,
         type: TRANSACTION_TYPES.REFUND,
-        amount: walletDeducted,
+        amount: totalRefund,
         balanceBefore: oldBal,
-        balanceAfter: Number((oldBal + walletDeducted).toFixed(2)),
+        balanceAfter: safeRound(oldBal + totalRefund),
         reference,
         description,
         session,
@@ -249,7 +308,18 @@ const creditWalletDirect = async ({ userId, amount, reference = null, descriptio
 
     const oldUser = await User.findOneAndUpdate(
         { _id: userId },
-        [{ $set: { walletBalance: { $add: ['$walletBalance', amount] } } }],
+        [
+            {
+                $set: {
+                    walletBalance: roundMoneyExpression({ $add: ['$walletBalance', amount] }),
+                },
+            },
+            {
+                $set: {
+                    creditUsed: creditUsedExpressionForBalance('$walletBalance'),
+                },
+            },
+        ],
         opts
     );
 
@@ -262,7 +332,7 @@ const creditWalletDirect = async ({ userId, amount, reference = null, descriptio
         type: TRANSACTION_TYPES.CREDIT,
         amount,
         balanceBefore: oldBal,
-        balanceAfter: Number((oldBal + amount).toFixed(2)),
+        balanceAfter: safeRound(oldBal + amount),
         reference,
         description,
         session,
@@ -301,4 +371,11 @@ const getTransactionHistory = async (userId, { page = 1, limit = 20 } = {}) => {
     };
 };
 
-module.exports = { debitWalletAtomic, forcedDebitWallet, refundWalletAtomic, creditWalletDirect, getTransactionHistory };
+module.exports = {
+    debitWalletAtomic,
+    forcedDebitWallet,
+    refundWalletAtomic,
+    creditWalletDirect,
+    getTransactionHistory,
+    recalculateCreditUsed,
+};

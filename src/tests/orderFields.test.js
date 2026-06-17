@@ -50,6 +50,7 @@ const { Product, FIELD_TYPES } = require('../modules/products/product.model');
 const { Order } = require('../modules/orders/order.model');
 const { validateOrderFields } = require('../modules/orders/orderFields.validator');
 const { createOrder } = require('../modules/orders/order.service');
+const meController = require('../modules/me/me.controller');
 const productService = require('../modules/products/product.service');
 
 const {
@@ -99,6 +100,32 @@ const FIELDS = [
         isActive: true,
     },
 ];
+
+const placeMeOrder = ({ customer, body }) => new Promise((resolve, reject) => {
+    const res = {
+        statusCode: null,
+        status: jest.fn(function status(code) {
+            this.statusCode = code;
+            return this;
+        }),
+        json: jest.fn(function json(payload) {
+            resolve({ statusCode: this.statusCode, body: payload });
+            return this;
+        }),
+    };
+
+    const req = {
+        body,
+        user: { _id: customer._id },
+        headers: {},
+        ip: '127.0.0.1',
+        get: jest.fn(() => null),
+    };
+
+    meController.placeOrder(req, res, (err) => {
+        if (err) reject(err);
+    });
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // [1] validateOrderFields — pure unit tests (no DB)
@@ -331,6 +358,75 @@ describe('[3] Order creation — orderFields integration', () => {
         expect(order.customerInput).not.toBeNull();
         expect(order.customerInput.values.player_id).toBe('9876');
         expect(order.customerInput.values.server).toBe('NA');
+    });
+
+    it('/me/orders accepts orderFieldsValues with player_id', async () => {
+        const product = await createProduct({ basePrice: 10, minQty: 1, maxQty: 10, orderFields: FIELDS });
+
+        const response = await placeMeOrder({
+            customer,
+            body: {
+                productId: product._id.toString(),
+                quantity: 1,
+                orderFieldsValues: { player_id: '9876', server: 'NA' },
+            },
+        });
+
+        expect(response.statusCode).toBe(201);
+        expect(response.body.success).toBe(true);
+        expect(response.body.data.customerInput.values.player_id).toBe('9876');
+        expect(response.body.data.customerInput.values.server).toBe('NA');
+    });
+
+    it('/me/orders accepts customInputs alias when orderFieldsValues is missing', async () => {
+        const product = await createProduct({ basePrice: 10, minQty: 1, maxQty: 10, orderFields: FIELDS });
+
+        const response = await placeMeOrder({
+            customer,
+            body: {
+                productId: product._id.toString(),
+                quantity: 1,
+                customInputs: { player_id: 'player-777', server: 'EU' },
+            },
+        });
+
+        expect(response.statusCode).toBe(201);
+        expect(response.body.data.customerInput.values.player_id).toBe('player-777');
+        expect(response.body.data.customerInput.values.server).toBe('EU');
+    });
+
+    it('/me/orders accepts dynamicFields alias when orderFieldsValues is missing', async () => {
+        const product = await createProduct({ basePrice: 10, minQty: 1, maxQty: 10, orderFields: FIELDS });
+
+        const response = await placeMeOrder({
+            customer,
+            body: {
+                productId: product._id.toString(),
+                quantity: 1,
+                dynamicFields: { player_id: 'player-888', server: 'Middle East' },
+            },
+        });
+
+        expect(response.statusCode).toBe(201);
+        expect(response.body.data.customerInput.values.player_id).toBe('player-888');
+        expect(response.body.data.customerInput.values.server).toBe('Middle East');
+    });
+
+    it('/me/orders still rejects missing required fields and includes field key/label', async () => {
+        const product = await createProduct({ basePrice: 10, minQty: 1, maxQty: 10, orderFields: FIELDS });
+
+        const err = await placeMeOrder({
+            customer,
+            body: {
+                productId: product._id.toString(),
+                quantity: 1,
+                orderFieldsValues: { server: 'EU' },
+            },
+        }).catch((error) => error);
+
+        expect(err).toMatchObject({ code: 'INVALID_ORDER_FIELDS' });
+        expect(err.message).toContain('Player ID');
+        expect(err.message).toContain('player_id');
     });
 
     it('accepts customInputs object and remaps order-field labels to internal keys', async () => {

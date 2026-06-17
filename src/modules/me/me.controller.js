@@ -22,6 +22,50 @@ const { AuthorizationError, BusinessRuleError, NotFoundError } = require('../../
 const parsePage = (v) => Math.max(1, parseInt(v, 10) || 1);
 const parseLimit = (v) => Math.min(100, Math.max(1, parseInt(v, 10) || 20));
 
+const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
+
+const normalizeOrderFieldAliasPayload = (value) => {
+    if (!value) return {};
+
+    if (Array.isArray(value)) {
+        return value.reduce((acc, item) => {
+            if (!item || typeof item !== 'object') return acc;
+
+            const fieldKey = String(
+                item.key ?? item.name ?? item.field ?? item.id ?? item.label ?? ''
+            ).trim();
+            if (!fieldKey) return acc;
+
+            const resolvedValue = hasOwn(item, 'value')
+                ? item.value
+                : (item.input ?? item.answer ?? item.data);
+
+            if (resolvedValue !== undefined) {
+                acc[fieldKey] = resolvedValue;
+            }
+
+            return acc;
+        }, {});
+    }
+
+    if (typeof value === 'object') {
+        return { ...value };
+    }
+
+    return {};
+};
+
+const resolveOrderFieldsPayload = ({ orderFieldsValues, customInputs, dynamicFields }) => {
+    for (const source of [orderFieldsValues, customInputs, dynamicFields]) {
+        const normalized = normalizeOrderFieldAliasPayload(source);
+        if (Object.keys(normalized).length > 0) {
+            return normalized;
+        }
+    }
+
+    return {};
+};
+
 // =============================================================================
 // PROFILE  —  GET /api/me
 // =============================================================================
@@ -210,14 +254,26 @@ const uploadOrderFieldImage = catchAsync(async (req, res) => {
 
 /**
  * Place a new order. Only ACTIVE + verified users can place orders.
- * Balance must be >= order cost (credit system removed).
+ * Wallet balance plus credit limit must cover the order cost.
  */
 const placeOrder = catchAsync(async (req, res) => {
-    const { productId, quantity, orderFieldsValues, link, target } = req.body;
+    const {
+        productId,
+        quantity,
+        orderFieldsValues,
+        customInputs,
+        dynamicFields,
+        link,
+        target,
+    } = req.body;
 
     // Merge top-level link/target into orderFieldsValues so they always
     // reach customerInput (SMM providers need these as provider params).
-    const mergedFields = { ...orderFieldsValues };
+    const mergedFields = resolveOrderFieldsPayload({
+        orderFieldsValues,
+        customInputs,
+        dynamicFields,
+    });
     if (link && !mergedFields.link) mergedFields.link = link;
     if (target && !mergedFields.target) mergedFields.target = target;
     const finalFields = Object.keys(mergedFields).length > 0 ? mergedFields : null;
@@ -278,7 +334,7 @@ const getProducts = catchAsync(async (req, res) => {
             .sort({ name: 1 })
             .skip(skip)
             .limit(limit)
-            .select('-providerProduct -orderFields')
+            .select('-providerProduct')
             .lean(),
         Product.countDocuments(filter),
     ]);

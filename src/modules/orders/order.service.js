@@ -282,7 +282,7 @@ const validateDynamicFieldsInput = (dynamicFields = [], submittedValues = {}) =>
         const isRequired = field.required !== false;
 
         if (isRequired && isMissing) {
-            errors.push(`'${field.label || canonicalKey}' is required.`);
+            errors.push(`'${field.label || canonicalKey}' (key: '${canonicalKey}') is required.`);
             continue;
         }
 
@@ -1155,17 +1155,24 @@ const markOrderAsFailed = async (orderId, auditContext = null) => {
         // The user must receive back exactly what was taken from their wallet.
         //
         // Source of truth (frozen at order creation):
-        //   walletDeducted   – amount taken from the wallet balance
-        //   creditUsedAmount – amount taken from the credit line
-        //   chargedAmount    – total (walletDeducted + creditUsed), fallback
+        //   walletDeducted   – amount debited from the net wallet balance
+        //   creditUsedAmount – informational credit drawn by that debit
+        //   chargedAmount    – total fallback for legacy orders
         const walletPortion = Number(order.walletDeducted || 0);
         const creditPortion = Number(order.creditUsedAmount || 0);
+        const chargedPortion = Number(order.chargedAmount || 0);
+        const isLegacySplitRefund = walletPortion > 0
+            && creditPortion > 0
+            && chargedPortion > 0
+            && Math.abs((walletPortion + creditPortion) - chargedPortion) < 0.01;
 
-        // Fallback: if both split fields are 0 but chargedAmount exists,
-        // treat chargedAmount as a pure wallet charge (legacy orders).
-        const refundWallet = walletPortion > 0 ? walletPortion : Number(order.chargedAmount || 0);
+        // Fallback: support legacy orders that only recorded chargedAmount,
+        // or a legacy split where creditUsedAmount carried the refundable value.
+        const refundWallet = walletPortion > 0
+            ? (isLegacySplitRefund ? walletPortion + creditPortion : walletPortion)
+            : (creditPortion > 0 ? creditPortion : Number(order.chargedAmount || 0));
         const refundCredit = creditPortion;
-        const totalRefund = refundWallet + refundCredit;
+        const totalRefund = refundWallet;
 
         // ── Quantity-Only Billing: quantity refund instead of wallet ──────
         // For quantity_only orders, all financial fields are 0. The "refund"

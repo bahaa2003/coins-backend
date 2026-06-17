@@ -7,7 +7,7 @@
  * [1] Model Validation
  *   - Required fields enforced
  *   - Status enum validated
- *   - amountRequested > 0
+ *   - requestedAmount > 0
  *   - Virtuals: isApproved, isRejected, isPending
  *
  * [2] createDepositRequest
@@ -20,7 +20,7 @@
  *   - Wallet gets credited (walletBalance increases)
  *   - WalletTransaction record created
  *   - DEPOSIT_APPROVED + WALLET_CREDIT audit logs created
- *   - overrideAmount is used when provided
+ *   - admin override amount is used when provided
  *   - Cannot approve an already APPROVED deposit (DEPOSIT_ALREADY_APPROVED)
  *   - Cannot approve a REJECTED deposit (DEPOSIT_ALREADY_REJECTED)
  *
@@ -87,9 +87,12 @@ beforeEach(async () => {
 const flushAudit = () => new Promise((r) => setTimeout(r, 100));
 
 const VALID_DEPOSIT = {
-    amountRequested: 500,
-    transferImageUrl: 'https://example.com/receipt.jpg',
-    transferredFromNumber: '01012345678',
+    paymentMethodId: new mongoose.Types.ObjectId(),
+    requestedAmount: 500,
+    currency: 'USD',
+    exchangeRate: 1,
+    amountUsd: 500,
+    receiptImage: 'uploads/deposits/receipt.jpg',
 };
 
 let _group;
@@ -116,7 +119,6 @@ describe('[1] Model validation', () => {
         const doc = await DepositRequest.create({ userId, ...VALID_DEPOSIT });
         expect(doc._id).toBeDefined();
         expect(doc.status).toBe(DEPOSIT_STATUS.PENDING);
-        expect(doc.amountApproved).toBeNull();
         expect(doc.reviewedBy).toBeNull();
         expect(doc.reviewedAt).toBeNull();
     });
@@ -127,28 +129,49 @@ describe('[1] Model validation', () => {
         ).rejects.toThrow(/userId is required/);
     });
 
-    it('rejects when amountRequested is missing', async () => {
+    it('rejects when requestedAmount is missing', async () => {
         await expect(
-            DepositRequest.create({ userId, transferImageUrl: 'https://x.com/r.jpg', transferredFromNumber: '123' })
-        ).rejects.toThrow(/amountRequested is required/);
+            DepositRequest.create({
+                userId,
+                paymentMethodId: new mongoose.Types.ObjectId(),
+                currency: 'USD',
+                exchangeRate: 1,
+                amountUsd: 100,
+                receiptImage: 'uploads/deposits/receipt.jpg',
+            })
+        ).rejects.toThrow(/requestedAmount is required/);
     });
 
-    it('rejects when amountRequested <= 0', async () => {
+    it('rejects when requestedAmount <= 0', async () => {
         await expect(
-            DepositRequest.create({ userId, ...VALID_DEPOSIT, amountRequested: 0 })
+            DepositRequest.create({ userId, ...VALID_DEPOSIT, requestedAmount: 0 })
         ).rejects.toThrow(/greater than 0/);
     });
 
-    it('rejects when transferImageUrl is missing', async () => {
+    it('rejects when receiptImage is missing', async () => {
         await expect(
-            DepositRequest.create({ userId, amountRequested: 100, transferredFromNumber: '123' })
-        ).rejects.toThrow(/transferImageUrl is required/);
+            DepositRequest.create({
+                userId,
+                paymentMethodId: new mongoose.Types.ObjectId(),
+                requestedAmount: 100,
+                currency: 'USD',
+                exchangeRate: 1,
+                amountUsd: 100,
+            })
+        ).rejects.toThrow(/receiptImage is required/);
     });
 
-    it('rejects when transferredFromNumber is missing', async () => {
+    it('rejects when paymentMethodId is missing', async () => {
         await expect(
-            DepositRequest.create({ userId, amountRequested: 100, transferImageUrl: 'https://x.com/r.jpg' })
-        ).rejects.toThrow(/transferredFromNumber is required/);
+            DepositRequest.create({
+                userId,
+                requestedAmount: 100,
+                currency: 'USD',
+                exchangeRate: 1,
+                amountUsd: 100,
+                receiptImage: 'uploads/deposits/receipt.jpg',
+            })
+        ).rejects.toThrow(/paymentMethodId is required/);
     });
 
     it('rejects invalid status value', async () => {
@@ -204,8 +227,7 @@ describe('[2] createDepositRequest', () => {
 
         expect(deposit.status).toBe(DEPOSIT_STATUS.PENDING);
         expect(deposit.userId.toString()).toBe(customer._id.toString());
-        expect(deposit.amountRequested).toBe(500);
-        expect(deposit.amountApproved).toBeNull();
+        expect(deposit.requestedAmount).toBe(500);
         expect(deposit.reviewedBy).toBeNull();
     });
 
@@ -232,12 +254,17 @@ describe('[2] createDepositRequest', () => {
         expect(log).not.toBeNull();
         expect(log.entityType).toBe(ENTITY_TYPES.DEPOSIT);
         expect(log.entityId.toString()).toBe(deposit._id.toString());
-        expect(log.metadata.amountRequested).toBe(500);
+        expect(log.metadata.requestedAmount).toBe(500);
     });
 
     it('allows a user to submit multiple pending requests', async () => {
         await depositService.createDepositRequest({ userId: customer._id, ...VALID_DEPOSIT });
-        await depositService.createDepositRequest({ userId: customer._id, ...VALID_DEPOSIT, amountRequested: 200 });
+        await depositService.createDepositRequest({
+            userId: customer._id,
+            ...VALID_DEPOSIT,
+            requestedAmount: 200,
+            amountUsd: 200,
+        });
 
         const count = await DepositRequest.countDocuments({ userId: customer._id });
         expect(count).toBe(2);
@@ -271,16 +298,15 @@ describe('[3] approveDeposit', () => {
         expect(updated.status).toBe(DEPOSIT_STATUS.APPROVED);
     });
 
-    it('sets amountApproved, reviewedBy, reviewedAt on approval', async () => {
+    it('sets reviewedBy and reviewedAt on approval', async () => {
         await depositService.approveDeposit(deposit._id, admin._id);
 
         const updated = await DepositRequest.findById(deposit._id);
-        expect(updated.amountApproved).toBe(500);
         expect(updated.reviewedBy.toString()).toBe(admin._id.toString());
         expect(updated.reviewedAt).toBeInstanceOf(Date);
     });
 
-    it('credits the user wallet by amountRequested', async () => {
+    it('credits the user wallet by requestedAmount', async () => {
         const before = await User.findById(customer._id);
         expect(before.walletBalance).toBe(0);
 
@@ -288,6 +314,48 @@ describe('[3] approveDeposit', () => {
 
         const after = await User.findById(customer._id);
         expect(after.walletBalance).toBe(500);
+    });
+
+    it('repays partial debt and recalculates creditUsed', async () => {
+        await User.findByIdAndUpdate(customer._id, {
+            walletBalance: -500,
+            creditLimit: 500,
+            creditUsed: 500,
+        });
+
+        const debtDeposit = await depositService.createDepositRequest({
+            userId: customer._id,
+            ...VALID_DEPOSIT,
+            requestedAmount: 200,
+            amountUsd: 200,
+        });
+
+        await depositService.approveDeposit(debtDeposit._id, admin._id);
+
+        const after = await User.findById(customer._id);
+        expect(after.walletBalance).toBe(-300);
+        expect(after.creditUsed).toBe(300);
+    });
+
+    it('clears debt when deposit overpays and leaves positive balance', async () => {
+        await User.findByIdAndUpdate(customer._id, {
+            walletBalance: -500,
+            creditLimit: 500,
+            creditUsed: 500,
+        });
+
+        const debtDeposit = await depositService.createDepositRequest({
+            userId: customer._id,
+            ...VALID_DEPOSIT,
+            requestedAmount: 700,
+            amountUsd: 700,
+        });
+
+        await depositService.approveDeposit(debtDeposit._id, admin._id);
+
+        const after = await User.findById(customer._id);
+        expect(after.walletBalance).toBe(200);
+        expect(after.creditUsed).toBe(0);
     });
 
     it('creates a WalletTransaction CREDIT record', async () => {
@@ -300,11 +368,11 @@ describe('[3] approveDeposit', () => {
         expect(tx.balanceAfter).toBe(500);
     });
 
-    it('uses overrideAmount instead of amountRequested when provided', async () => {
-        await depositService.approveDeposit(deposit._id, admin._id, 300);
+    it('uses override amount instead of requestedAmount when provided', async () => {
+        await depositService.approveDeposit(deposit._id, admin._id, { amount: 300 });
 
         const updated = await DepositRequest.findById(deposit._id);
-        expect(updated.amountApproved).toBe(300);
+        expect(updated.requestedAmount).toBe(300);
 
         const after = await User.findById(customer._id);
         expect(after.walletBalance).toBe(300);
@@ -317,7 +385,7 @@ describe('[3] approveDeposit', () => {
         const approveLog = await AuditLog.findOne({ action: DEPOSIT_ACTIONS.APPROVED }).lean();
         expect(approveLog).not.toBeNull();
         expect(approveLog.entityType).toBe(ENTITY_TYPES.DEPOSIT);
-        expect(approveLog.metadata.amountApproved).toBe(500);
+        expect(approveLog.metadata.finalAmount).toBe(500);
 
         const walletLog = await AuditLog.findOne({ action: WALLET_ACTIONS.CREDIT }).lean();
         expect(walletLog).not.toBeNull();
@@ -458,7 +526,7 @@ describe('[5] Concurrency', () => {
 
         const deposit = await depositService.createDepositRequest({
             userId: customer._id,
-            ...VALID_DEPOSIT,  // amountRequested: 500
+            ...VALID_DEPOSIT,  // requestedAmount: 500
         });
 
         // Fire two approvals simultaneously
@@ -503,11 +571,26 @@ describe('[6] listDeposits / listMyDeposits', () => {
         // 3 deposits for customerA (2 pending, 1 approved)
         const d1 = await depositService.createDepositRequest({ userId: customerA._id, ...VALID_DEPOSIT });
         await depositService.approveDeposit(d1._id, admin._id);
-        await depositService.createDepositRequest({ userId: customerA._id, ...VALID_DEPOSIT, amountRequested: 200 });
-        await depositService.createDepositRequest({ userId: customerA._id, ...VALID_DEPOSIT, amountRequested: 300 });
+        await depositService.createDepositRequest({
+            userId: customerA._id,
+            ...VALID_DEPOSIT,
+            requestedAmount: 200,
+            amountUsd: 200,
+        });
+        await depositService.createDepositRequest({
+            userId: customerA._id,
+            ...VALID_DEPOSIT,
+            requestedAmount: 300,
+            amountUsd: 300,
+        });
 
         // 1 deposit for customerB
-        await depositService.createDepositRequest({ userId: customerB._id, ...VALID_DEPOSIT, amountRequested: 100 });
+        await depositService.createDepositRequest({
+            userId: customerB._id,
+            ...VALID_DEPOSIT,
+            requestedAmount: 100,
+            amountUsd: 100,
+        });
     });
 
     it('listDeposits returns all deposits for admin', async () => {
@@ -620,14 +703,14 @@ describe('[8] Audit log correctness', () => {
         expect(log.entityId.toString()).toBe(deposit._id.toString());
     });
 
-    it('DEPOSIT_APPROVED log records amountApproved in metadata', async () => {
+    it('DEPOSIT_APPROVED log records finalAmount in metadata', async () => {
         const deposit = await depositService.createDepositRequest({ userId: customer._id, ...VALID_DEPOSIT });
-        await depositService.approveDeposit(deposit._id, admin._id, 450);
+        await depositService.approveDeposit(deposit._id, admin._id, { amount: 450 });
         await flushAudit();
 
         const log = await AuditLog.findOne({ action: DEPOSIT_ACTIONS.APPROVED }).lean();
-        expect(log.metadata.amountApproved).toBe(450);
-        expect(log.metadata.amountRequested).toBe(500);
+        expect(log.metadata.finalAmount).toBe(450);
+        expect(log.metadata.originalRequestedAmount).toBe(500);
     });
 
     it('DEPOSIT_REJECTED log records the admin reviewer', async () => {

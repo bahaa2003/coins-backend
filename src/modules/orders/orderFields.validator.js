@@ -90,7 +90,7 @@ const validateOrderFields = (orderFields = [], orderFieldsValues = {}) => {
         // ── 2. Required check ─────────────────────────────────────────────────
         const isMissing = raw === undefined || raw === null || raw === '';
         if (required && isMissing) {
-            errors.push(`'${label}' is required.`);
+            errors.push(`'${label}' (key: '${key}') is required.`);
             continue;
         }
 

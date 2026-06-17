@@ -11,6 +11,7 @@
  */
 
 const { User, USER_STATUS, ROLES } = require('../users/user.model');
+const { recalculateCreditUsed } = require('../wallet/wallet.service');
 const { NotFoundError, ConflictError, BusinessRuleError } = require('../../shared/errors/AppError');
 const { createAuditLog } = require('../audit/audit.service');
 const {
@@ -425,6 +426,7 @@ const updateUserCreditLimit = async (id, creditLimit, adminId) => {
 
     const previousCreditLimit = user.creditLimit || 0;
     user.creditLimit = Math.max(0, Number(creditLimit) || 0);
+    user.creditUsed = recalculateCreditUsed(user.walletBalance, user.creditLimit);
     await user.save();
 
     createAuditLog({

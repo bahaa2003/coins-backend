@@ -66,7 +66,7 @@ const getBalance = catchAsync(async (req, res) => {
 
     sendSuccess(res, {
         email: reseller.email || req.user?.email || null,
-        balance: Number((walletBalance + creditLimit - creditUsed).toFixed(2)),
+        balance: Number((walletBalance + creditLimit).toFixed(2)),
         walletBalance,
         creditLimit,
         creditUsed,

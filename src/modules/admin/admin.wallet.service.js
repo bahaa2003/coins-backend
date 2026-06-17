@@ -11,6 +11,7 @@
 
 const { User } = require('../users/user.model');
 const { WalletTransaction, TRANSACTION_TYPES } = require('../wallet/walletTransaction.model');
+const { recalculateCreditUsed } = require('../wallet/wallet.service');
 const { NotFoundError, BusinessRuleError } = require('../../shared/errors/AppError');
 const { createAuditLog } = require('../audit/audit.service');
 const { ADMIN_ACTIONS, ENTITY_TYPES, ACTOR_ROLES } = require('../audit/audit.constants');
@@ -111,17 +112,10 @@ const addFunds = async (userId, amount, reason, adminId) => {
 
     const userCurrency = user.currency || 'USD';
     const balanceBefore = safeRound(user.walletBalance || 0);
-    const creditUsedBefore = safeRound(user.creditUsed || 0);
-
-    // If user has drawn credit (creditUsed > 0), adding funds repays credit first.
-    // Example: balance=-50, creditUsed=50, add 80 → creditUsed=0, balance=30
-    let creditRepaid = 0;
-    if (creditUsedBefore > 0 && balanceBefore < 0) {
-        creditRepaid = safeRound(Math.min(parsedAmount, creditUsedBefore));
-    }
-
     const balanceAfter = safeRound(balanceBefore + parsedAmount);
-    const creditUsedAfter = safeRound(creditUsedBefore - creditRepaid);
+    const creditUsedBefore = recalculateCreditUsed(balanceBefore, user.creditLimit);
+    const creditUsedAfter = recalculateCreditUsed(balanceAfter, user.creditLimit);
+    const creditRepaid = safeRound(Math.max(0, creditUsedBefore - creditUsedAfter));
 
     // Atomic update
     await User.findByIdAndUpdate(userId, {
@@ -173,7 +167,7 @@ const addFunds = async (userId, amount, reason, adminId) => {
  * (the same currency as their walletBalance). No USD conversion is applied.
  *
  * CREDIT LIMIT ENFORCEMENT:
- *   available = walletBalance + (creditLimit - creditUsed)
+ *   available = walletBalance + creditLimit
  *   Deduction allowed only if: amount <= available
  *   newBalance = walletBalance - amount (can go negative up to -creditLimit)
  */
@@ -194,28 +188,21 @@ const deductFunds = async (userId, amount, reason, adminId) => {
     const userCurrency = user.currency || 'USD';
     const balanceBefore = safeRound(user.walletBalance || 0);
     const creditLimit = safeRound(Math.abs(Number(user.creditLimit || 0)));
-    const creditUsedBefore = safeRound(user.creditUsed || 0);
-    const availableCredit = safeRound(creditLimit - creditUsedBefore);
-    const totalAvailable = safeRound(balanceBefore + availableCredit);
+    const creditUsedBefore = recalculateCreditUsed(balanceBefore, creditLimit);
+    const totalAvailable = safeRound(balanceBefore + creditLimit);
 
     if (parsedAmount > totalAvailable) {
         throw new BusinessRuleError(
             `Insufficient funds. Available: ${totalAvailable.toFixed(2)} ${userCurrency} ` +
-            `(balance: ${balanceBefore.toFixed(2)}, available credit: ${availableCredit.toFixed(2)}).`,
+            `(balance: ${balanceBefore.toFixed(2)}, credit limit: ${creditLimit.toFixed(2)}).`,
             'INSUFFICIENT_BALANCE'
         );
     }
 
     // Calculate new balance and credit usage
     const balanceAfter = safeRound(balanceBefore - parsedAmount);
-
-    // If balance goes negative, the deficit is drawn from credit
-    let creditDrawn = 0;
-    if (balanceAfter < 0) {
-        // How much of the credit line is now being used
-        creditDrawn = safeRound(Math.min(Math.abs(balanceAfter), availableCredit));
-    }
-    const creditUsedAfter = safeRound(creditUsedBefore + creditDrawn);
+    const creditUsedAfter = recalculateCreditUsed(balanceAfter, creditLimit);
+    const creditDrawn = safeRound(Math.max(0, creditUsedAfter - creditUsedBefore));
 
     // Atomic update
     await User.findByIdAndUpdate(userId, {
@@ -290,13 +277,7 @@ const setBalance = async (userId, targetBalance, reason, adminId) => {
 
     const userCurrency = user.currency || 'USD';
     const balanceBefore = safeRound(user.walletBalance || 0);
-    const creditLimit = safeRound(Math.abs(Number(user.creditLimit || 0)));
-
-    // Recalculate credit usage based on the new balance
-    // If newBalance < 0, creditUsed = min(|newBalance|, creditLimit)
-    const creditUsedAfter = newBalance < 0
-        ? safeRound(Math.min(Math.abs(newBalance), creditLimit))
-        : 0;
+    const creditUsedAfter = recalculateCreditUsed(newBalance, user.creditLimit);
 
     // Atomic update
     await User.findByIdAndUpdate(userId, {
@@ -399,14 +380,7 @@ const adjustNegativeBalancesForInflation = async (percentageIncrease, adminId, c
             if (adjustment < 0.01) continue;
 
             const balanceAfter = safeRound(balanceBefore - adjustment);
-            const creditLimit = safeRound(Math.abs(Number(user.creditLimit || 0)));
-            const creditUsedBefore = safeRound(user.creditUsed || 0);
-
-            // Recalculate credit usage: if balance goes deeper negative,
-            // creditUsed increases by the adjustment (capped at creditLimit)
-            const creditUsedAfter = balanceAfter < 0
-                ? safeRound(Math.min(Math.abs(balanceAfter), creditLimit))
-                : 0;
+            const creditUsedAfter = recalculateCreditUsed(balanceAfter, user.creditLimit);
 
             // Atomic balance update
             await User.findByIdAndUpdate(user._id, {
@@ -509,12 +483,7 @@ const adjustNegativeBalancesForDeflation = async (percentageDecrease, adminId, c
 
             // ADD the adjustment (debt relief — balance moves toward 0)
             const balanceAfter = safeRound(balanceBefore + adjustment);
-            const creditLimit = safeRound(Math.abs(Number(user.creditLimit || 0)));
-
-            // Recalculate credit usage
-            const creditUsedAfter = balanceAfter < 0
-                ? safeRound(Math.min(Math.abs(balanceAfter), creditLimit))
-                : 0;
+            const creditUsedAfter = recalculateCreditUsed(balanceAfter, user.creditLimit);
 
             // Atomic balance update
             await User.findByIdAndUpdate(user._id, {

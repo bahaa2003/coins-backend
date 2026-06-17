@@ -111,6 +111,11 @@ const registry = new Map([
     ['karak chat', DealerApiAdapter],
     ['karakchat', DealerApiAdapter],
 
+    ['ibulala', DealerApiAdapter],
+    ['ibulala-chat', DealerApiAdapter],
+    ['ibulala chat', DealerApiAdapter],
+    ['ibulalachat', DealerApiAdapter],
+
     // ── Default test / dev adapter ────────────────────────────────────────────
     ['mock', MockProviderAdapter],
 ]);

@@ -214,7 +214,10 @@ const userSchema = new mongoose.Schema(
          * creditUsed: the amount of the credit line currently drawn.
          *
          * Real spendable formula:
-         *   available = walletBalance + (creditLimit - creditUsed)
+         *   available = walletBalance + creditLimit
+         *
+         * creditUsed is a derived reporting mirror:
+         *   walletBalance < 0 ? min(abs(walletBalance), creditLimit) : 0
          *
          * On order creation:
          *   - wallet is used first
@@ -354,7 +357,7 @@ userSchema.virtual('availableBalance').get(function () {
 
 /** How much credit remains available (undrawn). */
 userSchema.virtual('availableCredit').get(function () {
-    return parseFloat((this.creditLimit - this.creditUsed).toFixed(2));
+    return parseFloat(Math.max(0, (this.creditLimit || 0) - (this.creditUsed || 0)).toFixed(2));
 });
 
 /** Remaining quantity quota for quantity_only billing. */

@@ -78,16 +78,23 @@ const refundFailedOrder = async (order) => {
         // The user must receive back exactly what was taken from their wallet.
         //
         // Source of truth (frozen at order creation):
-        //   walletDeducted   – amount taken from the wallet balance
-        //   creditUsedAmount – amount taken from the credit line
+        //   walletDeducted   – amount debited from the net wallet balance
+        //   creditUsedAmount – informational credit drawn by that debit
         //   chargedAmount    – total (fallback for legacy orders)
         const walletPortion = Number(order.walletDeducted || 0);
         const creditPortion = Number(order.creditUsedAmount || 0);
+        const chargedPortion = Number(order.chargedAmount || 0);
+        const isLegacySplitRefund = walletPortion > 0
+            && creditPortion > 0
+            && chargedPortion > 0
+            && Math.abs((walletPortion + creditPortion) - chargedPortion) < 0.01;
 
         // Fallback: if split fields are 0 but chargedAmount exists, use it
-        const refundWallet = walletPortion > 0 ? walletPortion : Number(order.chargedAmount || 0);
+        const refundWallet = walletPortion > 0
+            ? (isLegacySplitRefund ? walletPortion + creditPortion : walletPortion)
+            : (creditPortion > 0 ? creditPortion : Number(order.chargedAmount || 0));
         const refundCredit = creditPortion;
-        const totalRefund = refundWallet + refundCredit;
+        const totalRefund = refundWallet;
 
         if (totalRefund <= 0) {
             // Nothing to refund — undo the CAS flag and bail

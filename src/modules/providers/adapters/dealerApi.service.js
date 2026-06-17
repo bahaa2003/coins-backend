@@ -2,6 +2,7 @@
 
 const axios = require('axios');
 const { BaseProviderAdapter } = require('./base.adapter');
+const { extractTargetId } = require('./providerParams.helper');
 
 const DEFAULT_TIMEOUT_MS = 180_000;
 const PROVIDER_NAME = 'DealerApi';
@@ -200,7 +201,7 @@ class DealerApiAdapter extends BaseProviderAdapter {
      * @returns {Promise<{ success: boolean, rawResponse: object }>}
      */
     async processSale(params = {}) {
-        const userId = params.userId ?? params.toUserId ?? params.playerId;
+        const userId = extractTargetId(params);
         const coins = params.coins ?? params.amount ?? params.quantity;
         const toUserId = Number(userId);
         const coinAmount = Number(coins);
@@ -234,21 +235,31 @@ class DealerApiAdapter extends BaseProviderAdapter {
 
     async placeOrder(params = {}) {
         try {
+            const targetId = extractTargetId(params);
+            if (!targetId) {
+                return {
+                    success: false,
+                    providerOrderId: null,
+                    providerStatus: 'Cancelled',
+                    unifiedStatus: this.toUnifiedStatus('Cancelled'),
+                    rawResponse: {
+                        status: 'ERROR',
+                        msg: 'Missing provider target/player ID',
+                    },
+                    errorCode: null,
+                    errorMessage: 'Missing provider target/player ID',
+                };
+            }
+
             const providerProductId = params.providerProductId ?? params.externalProductId ?? params.productId;
             const isKarakDynamicProduct = String(providerProductId || '').trim() === KARAK_DYNAMIC_PRODUCT_ID;
             const saleParams = isKarakDynamicProduct
                 ? {
-                    toUserId: params.toUserId
-                        ?? params.userId
-                        ?? params.playerId
-                        ?? params.player_id
-                        ?? params.uid
-                        ?? params.accountId
-                        ?? params.account_id,
+                    toUserId: targetId,
                     coins: Number(params.quantity),
                 }
                 : {
-                    userId: params.userId ?? params.toUserId ?? params.playerId,
+                    userId: targetId,
                     coins: params.coins ?? params.amount ?? params.quantity,
                 };
 

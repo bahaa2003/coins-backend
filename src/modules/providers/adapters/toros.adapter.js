@@ -37,6 +37,7 @@
 
 const axios = require('axios');
 const { BaseProviderAdapter } = require('./base.adapter');
+const { extractTargetId } = require('./providerParams.helper');
 
 const DEFAULT_TIMEOUT_MS = 180_000;
 
@@ -144,8 +145,21 @@ class TorosfonAdapter extends BaseProviderAdapter {
     async placeOrder(params) {
         const productId = params.productId ?? params.externalProductId;
         const amount = params.amount ?? params.quantity;
-        const playerId = params.playerId ?? '';
+        const playerId = extractTargetId(params);
         const referenceId = params.referenceId ?? '';
+
+        if (!playerId) {
+            return {
+                success: false,
+                providerOrderId: null,
+                providerStatus: 'Cancelled',
+                rawResponse: {
+                    status: 'ERROR',
+                    msg: 'Missing provider target/player ID',
+                },
+                errorMessage: 'Missing provider target/player ID',
+            };
+        }
 
         try {
             const { data } = await this._client.get(

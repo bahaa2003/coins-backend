@@ -3,12 +3,12 @@
 /**
  * order.test.js — Financial Order Logic Test Suite
  * ─────────────────────────────────────────────────
- * Credit/borrow system removed — all orders now require walletBalance >= cost.
+ * Credit/borrow system: orders may draw down to -creditLimit.
  *
  * Tests cover:
  *   1. Order within wallet balance
  *   2. Wallet-balance virtual field accuracy
- *   3. Strict insufficient funds rejection (no credit fallback)
+ *   3. Credit-limit debit and insufficient funds rejection
  *   4. Full refund — wallet-only order
  *   5. Full refund — second wallet draw refund
  *   6. Double refund prevention
@@ -73,16 +73,16 @@ const placeOrder = (overrides = {}) =>
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('Order within wallet balance', () => {
-    it('deducts only from walletBalance; creditUsedAmount always 0', async () => {
+    it('deducts from walletBalance without drawing credit', async () => {
         const customer = await createCustomer({ groupId: defaultGroup._id, walletBalance: 200 });
         const product = await createProduct({ basePrice: 50 });
 
         const { order } = await placeOrder({ userId: customer._id, productId: product._id, quantity: 2 });
 
         // Order assertions
-        expect(order.totalPrice).toBe(100);
+        expect(Number(order.totalPrice)).toBe(100);
         expect(order.walletDeducted).toBe(100);
-        expect(order.creditUsedAmount).toBe(0);  // always 0 — credit system removed
+        expect(Number(order.creditUsedAmount)).toBe(0);
         expect(order.status).toBe('PENDING');
 
         // User balance assertions
@@ -123,23 +123,20 @@ describe('Manual product costPrice profit', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('Wallet balance virtual field', () => {
-    it('availableBalance equals walletBalance (credit system removed)', async () => {
-        // Even if creditLimit/creditUsed are set, availableBalance is wallet-only
-        const customer = await createCustomer({ groupId: defaultGroup._id, walletBalance: 75 });
+    it('availableBalance equals walletBalance plus creditLimit', async () => {
+        const customer = await createCustomer({ groupId: defaultGroup._id, walletBalance: 75, creditLimit: 500 });
         const user = await freshUser(customer._id);
-        expect(user.availableBalance).toBe(75);
+        expect(user.availableBalance).toBe(575);
     });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 3. INSUFFICIENT FUNDS — STRICT WALLET-ONLY
+// 3. CREDIT LIMIT AND INSUFFICIENT FUNDS
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('Insufficient funds', () => {
-    it('rejects order when walletBalance < totalPrice (no credit fallback)', async () => {
-        // Previously: wallet=50, creditLimit=100, creditUsed=80 → available=70, price=80 → fail
-        // Now:        wallet=50 < price=80 → fail (credit line irrelevant)
-        const customer = await createCustomer({ groupId: defaultGroup._id, walletBalance: 50 });
+    it('rejects order when walletBalance plus creditLimit cannot cover totalPrice', async () => {
+        const customer = await createCustomer({ groupId: defaultGroup._id, walletBalance: 50, creditLimit: 0 });
         const product = await createProduct({ basePrice: 80, minQty: 1, maxQty: 1 });
 
         await expect(
@@ -155,6 +152,45 @@ describe('Insufficient funds', () => {
 
         const txnCount = await countTransactions(customer._id);
         expect(txnCount).toBe(0);
+    });
+
+    it('draws credit and updates creditUsed when wallet balance is insufficient', async () => {
+        const customer = await createCustomer({
+            groupId: defaultGroup._id,
+            walletBalance: 0,
+            creditLimit: 500,
+            creditUsed: 0,
+        });
+        const product = await createProduct({ basePrice: 200, minQty: 1, maxQty: 1 });
+
+        const { order } = await placeOrder({ userId: customer._id, productId: product._id });
+
+        expect(order.walletDeducted).toBe(200);
+        expect(Number(order.creditUsedAmount)).toBe(200);
+
+        const user = await freshUser(customer._id);
+        expect(user.walletBalance).toBe(-200);
+        expect(user.creditUsed).toBe(200);
+    });
+
+    it('rejects order when it would exceed credit limit', async () => {
+        const customer = await createCustomer({
+            groupId: defaultGroup._id,
+            walletBalance: 0,
+            creditLimit: 500,
+            creditUsed: 0,
+        });
+        const product = await createProduct({ basePrice: 501, minQty: 1, maxQty: 1 });
+
+        await expect(
+            placeOrder({ userId: customer._id, productId: product._id })
+        ).rejects.toMatchObject({
+            code: 'INSUFFICIENT_FUNDS',
+        });
+
+        const user = await freshUser(customer._id);
+        expect(user.walletBalance).toBe(0);
+        expect(user.creditUsed).toBe(0);
     });
 
     it('rejects order when walletBalance is zero and creditLimit is zero', async () => {
@@ -230,6 +266,41 @@ describe('Refund — wallet-only order', () => {
         const refundTxn = txns.find((t) => t.type === 'REFUND');
         expect(refundTxn).toBeDefined();
         expect(refundTxn.amount).toBe(100);
+    });
+
+    it('refund reduces existing debt and recalculates creditUsed', async () => {
+        const customer = await createCustomer({
+            groupId: defaultGroup._id,
+            walletBalance: -300,
+            creditLimit: 500,
+            creditUsed: 300,
+        });
+        const product = await createProduct({ basePrice: 100, minQty: 1, maxQty: 1 });
+
+        const order = await Order.create({
+            userId: customer._id,
+            productId: product._id,
+            quantity: 1,
+            unitPrice: 100,
+            totalPrice: 100,
+            basePriceSnapshot: 100,
+            markupPercentageSnapshot: 0,
+            finalPriceCharged: 100,
+            groupIdSnapshot: defaultGroup._id,
+            profitUsd: 0,
+            walletDeducted: 100,
+            creditUsedAmount: 0,
+            status: 'PENDING',
+            executionType: 'manual',
+            currency: 'USD',
+            chargedAmount: 100,
+        });
+
+        await orderService.markOrderAsFailed(order._id);
+
+        const user = await freshUser(customer._id);
+        expect(user.walletBalance).toBe(-200);
+        expect(user.creditUsed).toBe(200);
     });
 });
 

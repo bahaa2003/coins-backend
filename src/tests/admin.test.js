@@ -212,6 +212,21 @@ describe('[2] Admin Wallet Service', () => {
         expect(txn.amount).toBe(50);
     });
 
+    it('addFunds repays debt and recalculates creditUsed', async () => {
+        const { customer, admin } = await setup();
+        await User.findByIdAndUpdate(customer._id, {
+            walletBalance: -500,
+            creditLimit: 500,
+            creditUsed: 500,
+        });
+
+        await adminWalletService.addFunds(customer._id, 200, 'Debt repayment', admin._id);
+
+        const updated = await User.findById(customer._id);
+        expect(updated.walletBalance).toBe(-300);
+        expect(updated.creditUsed).toBe(300);
+    });
+
     it('addFunds rejects amount = 0', async () => {
         const { customer, admin } = await setup();
         await expect(adminWalletService.addFunds(customer._id, 0, 'bad', admin._id))
@@ -238,6 +253,21 @@ describe('[2] Admin Wallet Service', () => {
         expect(txn.amount).toBe(30);
     });
 
+    it('deductFunds can draw credit and recalculates creditUsed', async () => {
+        const { customer, admin } = await setup();
+        await User.findByIdAndUpdate(customer._id, {
+            walletBalance: 0,
+            creditLimit: 500,
+            creditUsed: 0,
+        });
+
+        await adminWalletService.deductFunds(customer._id, 200, 'Credit draw', admin._id);
+
+        const updated = await User.findById(customer._id);
+        expect(updated.walletBalance).toBe(-200);
+        expect(updated.creditUsed).toBe(200);
+    });
+
     it('deductFunds throws INSUFFICIENT_BALANCE when wallet is too low', async () => {
         const { customer, admin } = await setup();
         // customer has 100 — try to deduct 200
@@ -249,11 +279,32 @@ describe('[2] Admin Wallet Service', () => {
         expect(after.walletBalance).toBe(customer.walletBalance);
     });
 
+    it('setBalance recalculates creditUsed from the target balance', async () => {
+        const { customer, admin } = await setup();
+        await User.findByIdAndUpdate(customer._id, {
+            walletBalance: 100,
+            creditLimit: 500,
+            creditUsed: 0,
+        });
+
+        await adminWalletService.setBalance(customer._id, -250, 'Set debt', admin._id);
+
+        let updated = await User.findById(customer._id);
+        expect(updated.walletBalance).toBe(-250);
+        expect(updated.creditUsed).toBe(250);
+
+        await adminWalletService.setBalance(customer._id, 200, 'Clear debt', admin._id);
+
+        updated = await User.findById(customer._id);
+        expect(updated.walletBalance).toBe(200);
+        expect(updated.creditUsed).toBe(0);
+    });
+
     it('getWallet returns user with balance fields', async () => {
         const { customer } = await setup();
         const wallet = await adminWalletService.getWallet(customer._id);
-        expect(wallet.walletBalance).toBeDefined();
-        expect(wallet.creditLimit).toBeDefined();
+        expect(wallet.user.walletBalance).toBeDefined();
+        expect(wallet.user.creditLimit).toBeDefined();
     });
 
     it('getTransactionHistory returns paginated transactions', async () => {
