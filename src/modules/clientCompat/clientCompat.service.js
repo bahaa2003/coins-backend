@@ -20,6 +20,10 @@ const {
     parseProductIds,
     extractOrderFieldsFromQuery,
 } = require('./clientCompat.mappers');
+const {
+    isTargetAliasKey,
+    normalizeTargetAliasKey,
+} = require('../providers/adapters/providerParams.helper');
 
 const PRODUCT_SELECT = [
     'compatProductId',
@@ -37,10 +41,7 @@ const PRODUCT_SELECT = [
     'deletedAt',
 ].join(' ');
 
-const normalizeAlias = (value) => String(value || '')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9\u0600-\u06ff]+/g, '');
+const normalizeAlias = normalizeTargetAliasKey;
 
 const toBalanceString = (value) => {
     const numeric = Number(value || 0);
@@ -157,6 +158,7 @@ const priceProduct = async (product, reseller) => {
     return {
         priceUsd,
         price: Number(converted.finalAmount),
+        currency: userCurrency,
     };
 };
 
@@ -191,6 +193,7 @@ const listProducts = async (reseller, { productsId = '', base = false } = {}) =>
             category,
             price: priced.price,
             priceUsd: priced.priceUsd,
+            currency: priced.currency,
             minimal: base,
         }));
     }
@@ -250,6 +253,7 @@ const getContent = async (reseller, parentId) => {
             category,
             price: priced.price,
             priceUsd: priced.priceUsd,
+            currency: priced.currency,
         }));
     }
 
@@ -280,14 +284,25 @@ const findProductByCompatId = async (compatProductId) => {
 
 const normalizeOrderFieldsForProduct = (product, fields) => {
     const activeFields = getActiveFields(product);
-    if (activeFields.length === 0) return fields;
 
     const aliasMap = new Map();
+    const targetLikeRequiredFields = [];
+
     for (const field of activeFields) {
         const key = getFieldKey(field);
         const label = getFieldLabel(field);
         const canonical = key || field.name || field.id || label;
-        for (const alias of [key, label, field.name, field.id]) {
+        const aliases = [key, label, field.name, field.id, field.labelAr, field.placeholder, field.placeholderAr];
+
+        if (
+            field?.required !== false
+            && aliases.some((alias) => isTargetAliasKey(alias))
+            && canonical
+        ) {
+            targetLikeRequiredFields.push(canonical);
+        }
+
+        for (const alias of aliases) {
             const normalized = normalizeAlias(alias);
             if (normalized && canonical && !aliasMap.has(normalized)) {
                 aliasMap.set(normalized, canonical);
@@ -295,9 +310,15 @@ const normalizeOrderFieldsForProduct = (product, fields) => {
         }
     }
 
+    const uniqueTargetFieldKeys = [...new Set(targetLikeRequiredFields)];
+    const targetFieldKey = uniqueTargetFieldKeys.length === 1
+        ? uniqueTargetFieldKeys[0]
+        : null;
+
     const normalizedFields = {};
     for (const [key, value] of Object.entries(fields || {})) {
-        const mappedKey = aliasMap.get(normalizeAlias(key)) || key;
+        const mappedKey = aliasMap.get(normalizeAlias(key))
+            || (isTargetAliasKey(key) ? (targetFieldKey || 'playerId') : key);
         normalizedFields[mappedKey] = value;
     }
     return normalizedFields;

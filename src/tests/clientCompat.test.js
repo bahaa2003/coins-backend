@@ -14,6 +14,7 @@ const {
 } = require('./testHelpers');
 const { Category } = require('../modules/categories/category.model');
 const { Order, ORDER_STATUS } = require('../modules/orders/order.model');
+const { mapProduct } = require('../modules/clientCompat/clientCompat.mappers');
 
 let app;
 let server;
@@ -214,6 +215,10 @@ describe('Client compatibility API products and content', () => {
         expect(Number.isInteger(mappedPackage.id)).toBe(true);
         expect(mappedPackage.id).toBe(packageProduct.compatProductId);
         expect(mappedPackage.price).toBe(10);
+        expect(mappedPackage.cost).toBe(10);
+        expect(mappedPackage.rate).toBe(10);
+        expect(mappedPackage.api_price).toBe(10);
+        expect(mappedPackage.provider_price).toBe(10);
         expect(mappedPackage.params).toEqual(['Player ID']);
         expect(mappedPackage.category_name).toBe('PUBG Global ID UC');
         expect(mappedPackage.available).toBe(true);
@@ -221,12 +226,30 @@ describe('Client compatibility API products and content', () => {
         expect(mappedPackage.product_type).toBe('package');
         expect(mappedPackage.parent_id).toBe(category.compatCategoryId);
         expect(mappedPackage.base_price).toBe(10);
+        expect(mappedPackage.original_price).toBe(10);
+        expect(mappedPackage.currency).toBe('USD');
         expect(mappedPackage.category_img).toBe('images/category/1710948113.webp');
+        expect(mappedPackage).toMatchObject({
+            min: 1,
+            max: 1,
+            minQty: 1,
+            maxQty: 1,
+            min_quantity: 1,
+            max_quantity: 1,
+        });
 
         const mappedAmount = res.body.find((item) => item.name === 'UC Custom Amount');
         expect(mappedAmount.id).toBe(amountProduct.compatProductId);
         expect(mappedAmount.qty_values).toEqual({ min: '1', max: '50' });
         expect(mappedAmount.product_type).toBe('amount');
+        expect(mappedAmount).toMatchObject({
+            min: 1,
+            max: 50,
+            minQty: 1,
+            maxQty: 50,
+            min_quantity: 1,
+            max_quantity: 50,
+        });
 
         const filtered = await rawGet(
             `/client/api/products?products_id=${amountProduct.compatProductId},,bad`,
@@ -252,6 +275,12 @@ describe('Client compatibility API products and content', () => {
     test('returns root and category content without exposing legacy /api/client behavior', async () => {
         const { token } = await createApiReseller({ token: 'content-token' });
         const category = await createCompatCategory({ name: 'Root Category' });
+        const rootProduct = await createCompatProduct({
+            name: 'Root Product',
+            basePrice: '12',
+            minQty: 2,
+            maxQty: 25,
+        });
         const product = await createCompatProduct({
             name: 'Category Product',
             category: category._id.toString(),
@@ -268,6 +297,27 @@ describe('Client compatibility API products and content', () => {
                 available: true,
             }),
         ]));
+        expect(root.body.data.products).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                id: rootProduct.compatProductId,
+                name: 'Root Product',
+                price: 12,
+                cost: 12,
+                rate: 12,
+                api_price: 12,
+                provider_price: 12,
+                base_price: 12,
+                original_price: 12,
+                currency: 'USD',
+                qty_values: { min: '2', max: '25' },
+                min: 2,
+                max: 25,
+                minQty: 2,
+                maxQty: 25,
+                min_quantity: 2,
+                max_quantity: 25,
+            }),
+        ]));
 
         const categoryContent = await rawGet(
             `/client/api/content/${category.compatCategoryId}`,
@@ -279,6 +329,12 @@ describe('Client compatibility API products and content', () => {
                 id: product.compatProductId,
                 name: 'Category Product',
                 parent_id: category.compatCategoryId,
+                cost: 10,
+                rate: 10,
+                api_price: 10,
+                provider_price: 10,
+                original_price: 10,
+                currency: 'USD',
             }),
         ]));
 
@@ -287,6 +343,29 @@ describe('Client compatibility API products and content', () => {
         expect(legacy.body.success).toBe(true);
         expect(Array.isArray(legacy.body.data)).toBe(true);
         expect(typeof legacy.body.data[0].id).toBe('string');
+    });
+
+    test('mapper keeps fixed quantity lists and adds list aliases', () => {
+        const mapped = mapProduct({
+            product: {
+                compatProductId: 365,
+                name: 'Fixed List Product',
+                isActive: true,
+                qty_values: [100, 500, 1000],
+            },
+            category: null,
+            price: '1.2345678',
+            priceUsd: '1.1',
+            currency: 'egp',
+        });
+
+        expect(mapped.qty_values).toEqual([100, 500, 1000]);
+        expect(mapped.allowed_quantities).toEqual([100, 500, 1000]);
+        expect(mapped.quantities).toEqual([100, 500, 1000]);
+        expect(mapped.price).toBe(1.234568);
+        expect(mapped.cost).toBe(1.234568);
+        expect(mapped.original_price).toBe(1.1);
+        expect(mapped.currency).toBe('EGP');
     });
 });
 
@@ -339,6 +418,121 @@ describe('Client compatibility API orders', () => {
         expect(reloaded.walletBalance).toBe(90);
         expect(await countTransactions(reseller._id)).toBe(1);
         expect(await Order.countDocuments({ userId: reseller._id })).toBe(1);
+    });
+
+    test('maps Arabic display target key to player_id and ignores reseller metadata', async () => {
+        const { reseller, token } = await createApiReseller({ token: 'arabic-playerid-token' });
+        const product = await createCompatProduct({
+            name: 'Arabic PlayerId Product',
+            basePrice: '0.00001',
+            minQty: 1,
+            maxQty: 500000,
+            orderFields: [
+                {
+                    id: 'player',
+                    key: 'player_id',
+                    label: 'Player ID',
+                    type: 'text',
+                    required: true,
+                    isActive: true,
+                },
+            ],
+        });
+
+        const path = `/client/api/newOrder/${product.compatProductId}/params`
+            + `?qty=150000&${encodeURIComponent('ايدي المستخدم')}=10026`
+            + '&ourPriceApi=1.515&order_uuid=uuid-arabic-playerid';
+        const res = await rawGet(path, authHeaders(token));
+
+        expect(res.status).toBe(200);
+        expect(res.body.status).toBe('OK');
+        expect(res.body.data.data).toEqual({ player_id: '10026' });
+
+        const order = await Order.findOne({ userId: reseller._id, idempotencyKey: 'uuid-arabic-playerid' }).lean();
+        expect(order.customerInput.values).toEqual({ player_id: '10026' });
+        expect(order.customInputs).toEqual({ player_id: '10026' });
+        expect(order.customerInput.values).not.toHaveProperty('ourPriceApi');
+        expect(order.customInputs).not.toHaveProperty('ourPriceApi');
+    });
+
+    test('maps Arabic معرف المستخدم display key to the real product field key', async () => {
+        const { reseller, token } = await createApiReseller({ token: 'arabic-userid-token' });
+        const product = await createCompatProduct({
+            name: 'Arabic UserId Product',
+            orderFields: [
+                {
+                    id: 'user',
+                    key: 'user_id',
+                    label: 'User ID',
+                    type: 'text',
+                    required: true,
+                    isActive: true,
+                },
+            ],
+        });
+
+        const path = `/client/api/newOrder/${product.compatProductId}/params`
+            + `?qty=1&${encodeURIComponent('معرف المستخدم')}=10026`
+            + '&ourPriceApi=1.515&order_uuid=uuid-arabic-user-id';
+        const res = await rawGet(path, authHeaders(token));
+
+        expect(res.status).toBe(200);
+        expect(res.body.data.data).toEqual({ user_id: '10026' });
+
+        const order = await Order.findOne({ userId: reseller._id, idempotencyKey: 'uuid-arabic-user-id' }).lean();
+        expect(order.customerInput.values).toEqual({ user_id: '10026' });
+        expect(order.customInputs).not.toHaveProperty('ourPriceApi');
+    });
+
+    test('maps English display target key to the real product field key', async () => {
+        const { reseller, token } = await createApiReseller({ token: 'english-display-token' });
+        const product = await createCompatProduct({
+            name: 'English Display Product',
+            orderFields: [
+                {
+                    id: 'account',
+                    key: 'account_id',
+                    label: 'Account ID',
+                    type: 'text',
+                    required: true,
+                    isActive: true,
+                },
+            ],
+        });
+
+        const res = await rawGet(
+            `/client/api/newOrder/${product.compatProductId}/params?qty=1&Player%20ID=10026&order_uuid=uuid-player-id-display`,
+            authHeaders(token)
+        );
+
+        expect(res.status).toBe(200);
+        expect(res.body.data.data).toEqual({ account_id: '10026' });
+
+        const order = await Order.findOne({ userId: reseller._id, idempotencyKey: 'uuid-player-id-display' }).lean();
+        expect(order.customerInput.values).toEqual({ account_id: '10026' });
+    });
+
+    test('falls back Arabic display target key to playerId when product has no formal fields', async () => {
+        const { reseller, token } = await createApiReseller({ token: 'fallback-playerid-token' });
+        const product = await createCompatProduct({
+            name: 'Fallback Target Product',
+            orderFields: [],
+        });
+
+        const path = `/client/api/newOrder/${product.compatProductId}/params`
+            + `?qty=1&${encodeURIComponent('رقم اللاعب')}=10026`
+            + '&ourPriceApi=1.515&price=10&token=external-token&order_uuid=uuid-fallback-playerid';
+        const res = await rawGet(path, authHeaders(token));
+
+        expect(res.status).toBe(200);
+        expect(res.body.data.data).toEqual({ playerId: '10026' });
+
+        const order = await Order.findOne({ userId: reseller._id, idempotencyKey: 'uuid-fallback-playerid' }).lean();
+        expect(order.customerInput.values).toEqual({ playerId: '10026' });
+        expect(order.customInputs).toEqual({ playerId: '10026' });
+        expect(order.customerInput.values).not.toHaveProperty('ourPriceApi');
+        expect(order.customerInput.values).not.toHaveProperty('price');
+        expect(order.customerInput.values).not.toHaveProperty('token');
     });
 
     test('maps order creation validation failures to compatibility codes', async () => {

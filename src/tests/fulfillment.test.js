@@ -216,6 +216,32 @@ describe('[2] executeOrder -- provider cases', () => {
         expect(refundTxns[0].amount).toBe(50);
     });
 
+    it('provider placement failure never marks the order COMPLETED', async () => {
+        const order = await makeOrderDoc(customer._id);
+
+        const provider = makeMockProvider({
+            placeOrder: jest.fn().mockResolvedValue({
+                success: false,
+                providerOrderId: null,
+                providerStatus: 'Completed',
+                rawResponse: {
+                    status: 'ERROR',
+                    msg: 'Missing provider target/player ID',
+                },
+                errorMessage: 'Missing provider target/player ID',
+            }),
+        });
+
+        const { order: updated } = await executeOrder(order._id, provider);
+
+        expect(updated.status).toBe(ORDER_STATUS.FAILED);
+        expect(updated.status).not.toBe(ORDER_STATUS.COMPLETED);
+        expect(updated.providerRawResponse).toMatchObject({
+            status: 'ERROR',
+            msg: 'Missing provider target/player ID',
+        });
+    });
+
     it('Guard: non-PROCESSING order -> executeOrder is a no-op', async () => {
         const order = await makeOrderDoc(customer._id, { status: ORDER_STATUS.COMPLETED });
 

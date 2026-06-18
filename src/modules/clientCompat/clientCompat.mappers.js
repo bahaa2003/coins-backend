@@ -13,6 +13,11 @@ const toFixedCompatNumber = (value) => {
     return Number(numeric.toFixed(6));
 };
 
+const toSafeNumber = (value, fallback = 0) => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : fallback;
+};
+
 const mapStatus = (status) => {
     switch (status) {
         case ORDER_STATUS.COMPLETED:
@@ -63,22 +68,58 @@ const mapProductParams = (product = {}) => getActiveFields(product)
     .filter(Boolean);
 
 const mapQuantity = (product = {}) => {
+    const rawQuantityList = product.qty_values
+        ?? product.qtyValues
+        ?? product.allowed_quantities
+        ?? product.allowedQuantities
+        ?? product.quantities
+        ?? product.quantityValues;
+
+    if (Array.isArray(rawQuantityList)) {
+        return {
+            qty_values: rawQuantityList,
+            product_type: 'package',
+            aliases: {
+                allowed_quantities: rawQuantityList,
+                quantities: rawQuantityList,
+            },
+        };
+    }
+
     const minQty = Number(product.minQty || 1);
     const maxQty = Number(product.maxQty || minQty);
 
     if (Number.isFinite(minQty) && Number.isFinite(maxQty) && maxQty > minQty) {
+        const min = toSafeNumber(minQty, 1);
+        const max = toSafeNumber(maxQty, min);
         return {
             qty_values: {
                 min: String(minQty),
                 max: String(maxQty),
             },
             product_type: 'amount',
+            aliases: {
+                min,
+                max,
+                minQty: min,
+                maxQty: max,
+                min_quantity: min,
+                max_quantity: max,
+            },
         };
     }
 
     return {
         qty_values: null,
         product_type: 'package',
+        aliases: {
+            min: 1,
+            max: 1,
+            minQty: 1,
+            maxQty: 1,
+            min_quantity: 1,
+            max_quantity: 1,
+        },
     };
 };
 
@@ -87,7 +128,7 @@ const getCategoryForProduct = (product, categoryById) => {
     return categoryId ? categoryById.get(categoryId) || null : null;
 };
 
-const mapProduct = ({ product, category, price, priceUsd, minimal = false }) => {
+const mapProduct = ({ product, category, price, priceUsd, currency = 'USD', minimal = false }) => {
     const id = Number(product.compatProductId);
     if (minimal) {
         return {
@@ -97,18 +138,27 @@ const mapProduct = ({ product, category, price, priceUsd, minimal = false }) => 
     }
 
     const quantity = mapQuantity(product);
+    const finalPrice = toFixedCompatNumber(price);
+    const basePrice = toFixedCompatNumber(priceUsd ?? price);
     return {
         id,
         name: product.name,
-        price: toFixedCompatNumber(price),
+        price: finalPrice,
+        cost: finalPrice,
+        rate: finalPrice,
+        api_price: finalPrice,
+        provider_price: finalPrice,
         params: mapProductParams(product),
         category_name: category?.name || '',
         available: product.isActive !== false && !product.deletedAt,
         qty_values: quantity.qty_values,
         product_type: quantity.product_type,
         parent_id: Number(category?.compatCategoryId || 0),
-        base_price: toFixedCompatNumber(priceUsd ?? price),
+        base_price: basePrice,
+        original_price: basePrice,
+        currency: String(currency || 'USD').toUpperCase(),
         category_img: category?.image || '',
+        ...quantity.aliases,
     };
 };
 
@@ -167,11 +217,41 @@ const parseProductIds = (value) => String(value || '')
     .map((item) => Number(item))
     .filter((item) => Number.isInteger(item) && item > 0);
 
+const normalizeQueryFieldKey = (value) => String(value || '')
+    .normalize('NFKC')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\u0600-\u06ff]+/g, '');
+
+const IGNORED_ORDER_FIELD_KEYS = Object.freeze([
+    'ourPriceApi',
+    'price',
+    'cost',
+    'api_price',
+    'provider_price',
+    'base_price',
+    'original_price',
+    'currency',
+    'product_name',
+    'productName',
+    'category_name',
+    'categoryName',
+    'token',
+    'api_token',
+    'api-token',
+    'x-api-key',
+]);
+
+const IGNORED_ORDER_FIELD_KEY_LOOKUP = new Set(
+    IGNORED_ORDER_FIELD_KEYS.map(normalizeQueryFieldKey).filter(Boolean)
+);
+
 const extractOrderFieldsFromQuery = (query = {}) => {
     const fields = {};
 
     for (const [key, value] of Object.entries(query)) {
         if (key === 'qty' || key === 'order_uuid') continue;
+        if (IGNORED_ORDER_FIELD_KEY_LOOKUP.has(normalizeQueryFieldKey(key))) continue;
         if (value === undefined || value === null || value === '') continue;
         fields[key] = Array.isArray(value) ? value[value.length - 1] : String(value);
     }
@@ -193,5 +273,6 @@ module.exports = {
     mapCheckedOrder,
     parseOrdersQuery,
     parseProductIds,
+    IGNORED_ORDER_FIELD_KEYS,
     extractOrderFieldsFromQuery,
 };

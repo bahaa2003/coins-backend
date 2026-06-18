@@ -19,9 +19,24 @@ describe('providerParams.helper', () => {
         ['uid', 'uid-789'],
         ['link', 'https://example.com/profile/abc'],
         ['target', 'target-abc'],
+        ['ايدي المستخدم', '10026'],
+        ['ايدى المستخدم', '10027'],
+        ['معرف المستخدم', '10028'],
+        ['ايدي-اللاعب', '10029'],
+        ['يوزر ايدي', '10030'],
+        ['رابط الحساب', 'https://example.com/account/10030'],
+        ['Player ID', '10031'],
+        ['User ID', '10032'],
+        ['Account ID', '10033'],
+        ['ID', '10034'],
     ])('extracts %s', (key, value) => {
         expect(extractTargetId({ [key]: ` ${value} ` })).toBe(value);
         expect(hasTargetId({ [key]: value })).toBe(true);
+    });
+
+    it('extracts display aliases after normalizing spaces and punctuation', () => {
+        expect(extractTargetId({ 'ايديالمستخدم': '10035' })).toBe('10035');
+        expect(extractTargetId({ 'Player.ID': '10036' })).toBe('10036');
     });
 
     it('returns null when missing or blank', () => {
