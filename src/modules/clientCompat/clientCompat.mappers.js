@@ -128,35 +128,52 @@ const getCategoryForProduct = (product, categoryById) => {
     return categoryId ? categoryById.get(categoryId) || null : null;
 };
 
-const mapProduct = ({ product, category, price, priceUsd, currency = 'USD', minimal = false }) => {
-    const id = Number(product.compatProductId);
-    if (minimal) {
-        return {
-            id,
-            name: product.name,
-        };
-    }
-
-    const quantity = mapQuantity(product);
+const mapProductPriceAliases = ({ price, priceUsd, currency = 'USD' }) => {
     const finalPrice = toFixedCompatNumber(price);
     const basePrice = toFixedCompatNumber(priceUsd ?? price);
+
     return {
-        id,
-        name: product.name,
         price: finalPrice,
         cost: finalPrice,
         rate: finalPrice,
         api_price: finalPrice,
         provider_price: finalPrice,
+        base_price: basePrice,
+        original_price: basePrice,
+        currency: String(currency || 'USD').toUpperCase(),
+    };
+};
+
+const mapProduct = ({ product, category, price, priceUsd, currency = 'USD', minimal = false }) => {
+    const id = Number(product.compatProductId);
+    const priceAliases = mapProductPriceAliases({ price, priceUsd, currency });
+
+    if (minimal) {
+        return {
+            id,
+            name: product.name,
+            ...priceAliases,
+        };
+    }
+
+    const quantity = mapQuantity(product);
+    return {
+        id,
+        name: product.name,
+        price: priceAliases.price,
+        cost: priceAliases.cost,
+        rate: priceAliases.rate,
+        api_price: priceAliases.api_price,
+        provider_price: priceAliases.provider_price,
         params: mapProductParams(product),
         category_name: category?.name || '',
         available: product.isActive !== false && !product.deletedAt,
         qty_values: quantity.qty_values,
         product_type: quantity.product_type,
         parent_id: Number(category?.compatCategoryId || 0),
-        base_price: basePrice,
-        original_price: basePrice,
-        currency: String(currency || 'USD').toUpperCase(),
+        base_price: priceAliases.base_price,
+        original_price: priceAliases.original_price,
+        currency: priceAliases.currency,
         category_img: category?.image || '',
         ...quantity.aliases,
     };

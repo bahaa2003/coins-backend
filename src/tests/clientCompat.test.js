@@ -106,6 +106,54 @@ const createCompatProduct = (overrides = {}) => createProduct({
     ...overrides,
 });
 
+const CUSTOMER_PRICE_FIELDS = ['price', 'cost', 'rate', 'api_price', 'provider_price'];
+const BASE_PRICE_FIELDS = ['base_price', 'original_price'];
+const MINIMAL_PRODUCT_FIELDS = [
+    'id',
+    'name',
+    ...CUSTOMER_PRICE_FIELDS,
+    ...BASE_PRICE_FIELDS,
+    'currency',
+];
+const HEAVY_PRODUCT_FIELDS = [
+    'params',
+    'category_img',
+    'category_name',
+    'available',
+    'qty_values',
+    'product_type',
+    'parent_id',
+    'min',
+    'max',
+    'minQty',
+    'maxQty',
+    'min_quantity',
+    'max_quantity',
+];
+
+const expectNumericPriceFields = (product, { price, basePrice, currency = 'USD' } = {}) => {
+    for (const field of CUSTOMER_PRICE_FIELDS) {
+        expect(typeof product[field]).toBe('number');
+        expect(Number.isFinite(product[field])).toBe(true);
+        if (price !== undefined) expect(product[field]).toBe(price);
+    }
+
+    for (const field of BASE_PRICE_FIELDS) {
+        expect(typeof product[field]).toBe('number');
+        expect(Number.isFinite(product[field])).toBe(true);
+        if (basePrice !== undefined) expect(product[field]).toBe(basePrice);
+    }
+
+    expect(product.currency).toBe(currency);
+};
+
+const expectMinimalProductShape = (product) => {
+    expect(Object.keys(product)).toEqual(MINIMAL_PRODUCT_FIELDS);
+    for (const field of HEAVY_PRODUCT_FIELDS) {
+        expect(product).not.toHaveProperty(field);
+    }
+};
+
 beforeAll(async () => {
     await connectTestDB();
     app = require('../app');
@@ -219,6 +267,7 @@ describe('Client compatibility API products and content', () => {
         expect(mappedPackage.rate).toBe(10);
         expect(mappedPackage.api_price).toBe(10);
         expect(mappedPackage.provider_price).toBe(10);
+        expectNumericPriceFields(mappedPackage, { price: 10, basePrice: 10 });
         expect(mappedPackage.params).toEqual(['Player ID']);
         expect(mappedPackage.category_name).toBe('PUBG Global ID UC');
         expect(mappedPackage.available).toBe(true);
@@ -268,8 +317,40 @@ describe('Client compatibility API products and content', () => {
             {
                 id: packageProduct.compatProductId,
                 name: 'UC 60',
+                price: 10,
+                cost: 10,
+                rate: 10,
+                api_price: 10,
+                provider_price: 10,
+                base_price: 10,
+                original_price: 10,
+                currency: 'USD',
             },
         ]);
+        expectMinimalProductShape(minimal.body[0]);
+        expectNumericPriceFields(minimal.body[0], { price: 10, basePrice: 10 });
+
+        const minimalFiltered = await rawGet(
+            `/client/api/products?base=1&products_id=${packageProduct.compatProductId},${amountProduct.compatProductId}`,
+            authHeaders(token)
+        );
+        expect(minimalFiltered.status).toBe(200);
+        expect(minimalFiltered.body).toHaveLength(2);
+        expect(minimalFiltered.body.map((item) => item.id).sort((a, b) => a - b)).toEqual([
+            packageProduct.compatProductId,
+            amountProduct.compatProductId,
+        ].sort((a, b) => a - b));
+        for (const product of minimalFiltered.body) {
+            expectMinimalProductShape(product);
+            expectNumericPriceFields(product, { price: 10, basePrice: 10 });
+        }
+
+        const aliasMinimal = await rawGet(
+            `/api/client/api/products?base=1&products_id=${packageProduct.compatProductId}`,
+            authHeaders(token)
+        );
+        expect(aliasMinimal.status).toBe(200);
+        expect(aliasMinimal.body).toEqual(minimal.body);
     });
 
     test('returns root and category content without exposing legacy /api/client behavior', async () => {
@@ -366,6 +447,35 @@ describe('Client compatibility API products and content', () => {
         expect(mapped.cost).toBe(1.234568);
         expect(mapped.original_price).toBe(1.1);
         expect(mapped.currency).toBe('EGP');
+    });
+
+    test('mapper keeps minimal product price aliases numeric and finite', () => {
+        const mapped = mapProduct({
+            product: {
+                compatProductId: 366,
+                name: 'Invalid Price Product',
+            },
+            category: null,
+            price: 'not-a-number',
+            priceUsd: undefined,
+            currency: '',
+            minimal: true,
+        });
+
+        expect(mapped).toEqual({
+            id: 366,
+            name: 'Invalid Price Product',
+            price: 0,
+            cost: 0,
+            rate: 0,
+            api_price: 0,
+            provider_price: 0,
+            base_price: 0,
+            original_price: 0,
+            currency: 'USD',
+        });
+        expectMinimalProductShape(mapped);
+        expectNumericPriceFields(mapped, { price: 0, basePrice: 0 });
     });
 });
 
