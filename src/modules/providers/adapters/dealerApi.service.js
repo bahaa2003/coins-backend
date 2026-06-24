@@ -3,20 +3,42 @@
 const axios = require('axios');
 const { BaseProviderAdapter } = require('./base.adapter');
 const { extractTargetId } = require('./providerParams.helper');
+const { normalizeProviderDecimalPrice } = require('../../../shared/utils/decimalPrecision');
 
 const DEFAULT_TIMEOUT_MS = 180_000;
 const PROVIDER_NAME = 'DealerApi';
 const SUCCESS_CODE = '200';
-const KARAK_DYNAMIC_PRODUCT_ID = 'karak_dynamic_coins';
-const KARAK_DYNAMIC_PRODUCT = Object.freeze({
-    id: KARAK_DYNAMIC_PRODUCT_ID,
-    name: 'Karak Dynamic Coins (Any Amount)',
-    price: 0.00001,
-    minQty: 1,
-    maxQty: 5000000,
-    currency: 'USD',
-});
-const KARAK_PROVIDER_KEYS = new Set(['karak', 'karak-chat', 'karak chat', 'karakchat']);
+
+const DEALER_DYNAMIC_APPS = Object.freeze([
+    Object.freeze({
+        key: 'karak',
+        providerKeys: Object.freeze(['karak', 'karak-chat', 'karak chat', 'karakchat']),
+        product: Object.freeze({
+            id: 'karak_dynamic_coins',
+            name: 'Karak Dynamic Coins (Any Amount)',
+            price: 0.00001,
+            minQty: 1,
+            maxQty: 5000000,
+            currency: 'USD',
+        }),
+    }),
+    Object.freeze({
+        key: 'ibulala',
+        providerKeys: Object.freeze(['ibulala', 'ibulala-chat', 'ibulala chat', 'ibulalachat']),
+        product: Object.freeze({
+            id: 'ibulala_dynamic_coins',
+            name: 'Ibulala Dynamic Coins (Any Amount)',
+            price: '0.00000000001',
+            minQty: 1,
+            maxQty: 500000000,
+            currency: 'USD',
+        }),
+    }),
+]);
+
+const KARAK_DYNAMIC_APP = DEALER_DYNAMIC_APPS.find((app) => app.key === 'karak');
+const KARAK_DYNAMIC_PRODUCT = KARAK_DYNAMIC_APP.product;
+const KARAK_DYNAMIC_PRODUCT_ID = KARAK_DYNAMIC_PRODUCT.id;
 
 const ERROR_MESSAGES = Object.freeze({
     131: 'Dealer API rejected the request. Check secretKey and request parameters.',
@@ -27,33 +49,81 @@ const normalizeProviderKey = (value) => String(value ?? '').toLowerCase().trim()
 
 const compactProviderKey = (value) => normalizeProviderKey(value).replace(/[^a-z0-9]/g, '');
 
-const isKarakProvider = (provider = {}) => {
-    const candidates = [provider.code, provider.slug, provider.name, provider.providerCode];
+const toProviderMatchKeys = (value) => {
+    const normalized = normalizeProviderKey(value);
+    const compact = compactProviderKey(value);
 
-    return candidates.some((value) => {
-        const normalized = normalizeProviderKey(value);
-        const compact = compactProviderKey(value);
-        return KARAK_PROVIDER_KEYS.has(normalized) || KARAK_PROVIDER_KEYS.has(compact);
-    });
+    return [normalized, compact].filter(Boolean);
 };
 
-const buildKarakDynamicProductDto = () => ({
-    ...KARAK_DYNAMIC_PRODUCT,
-    externalProductId: KARAK_DYNAMIC_PRODUCT.id,
-    rawName: KARAK_DYNAMIC_PRODUCT.name,
-    rawPrice: KARAK_DYNAMIC_PRODUCT.price,
-    costPrice: KARAK_DYNAMIC_PRODUCT.price,
-    providerPrice: KARAK_DYNAMIC_PRODUCT.price,
-    minQty: KARAK_DYNAMIC_PRODUCT.minQty,
-    maxQty: KARAK_DYNAMIC_PRODUCT.maxQty,
-    isActive: true,
-    rawPayload: {
-        ...KARAK_DYNAMIC_PRODUCT,
-        product_id: KARAK_DYNAMIC_PRODUCT.id,
-        product_name: KARAK_DYNAMIC_PRODUCT.name,
-        product_price: KARAK_DYNAMIC_PRODUCT.price,
-    },
-});
+const buildProviderKeySet = (providerKeys = []) => new Set(
+    providerKeys.flatMap(toProviderMatchKeys)
+);
+
+const DEALER_DYNAMIC_APP_MATCHERS = DEALER_DYNAMIC_APPS.map((app) => Object.freeze({
+    app,
+    providerKeys: buildProviderKeySet(app.providerKeys),
+}));
+
+const getProviderCandidates = (provider = {}) => {
+    if (!provider || typeof provider !== 'object' || Array.isArray(provider)) {
+        return [provider];
+    }
+
+    return [provider.code, provider.slug, provider.name, provider.providerCode];
+};
+
+const getDealerDynamicApp = (provider = {}) => {
+    const candidateKeys = getProviderCandidates(provider).flatMap(toProviderMatchKeys);
+
+    return DEALER_DYNAMIC_APP_MATCHERS.find(({ providerKeys }) => (
+        candidateKeys.some((key) => providerKeys.has(key))
+    ))?.app ?? null;
+};
+
+const getDealerDynamicProduct = (provider = {}) => getDealerDynamicApp(provider)?.product ?? null;
+
+const getDealerDynamicProductById = (productId) => {
+    const normalizedProductId = String(productId ?? '').trim();
+
+    return DEALER_DYNAMIC_APPS.find((app) => app.product.id === normalizedProductId)?.product ?? null;
+};
+
+const isDealerDynamicProvider = (provider = {}) => Boolean(getDealerDynamicApp(provider));
+
+const isKarakProvider = (provider = {}) => getDealerDynamicApp(provider)?.key === 'karak';
+
+const buildDealerDynamicProductDto = (appOrProduct) => {
+    const product = appOrProduct?.product ?? appOrProduct;
+
+    if (!product?.id || !product?.name) {
+        throw new Error(`[${PROVIDER_NAME}] Dealer dynamic product config is invalid`);
+    }
+
+    const price = normalizeProviderDecimalPrice(product.price);
+
+    return {
+        ...product,
+        price,
+        externalProductId: product.id,
+        rawName: product.name,
+        rawPrice: price,
+        costPrice: price,
+        providerPrice: price,
+        minQty: product.minQty,
+        maxQty: product.maxQty,
+        isActive: true,
+        rawPayload: {
+            ...product,
+            price,
+            product_id: product.id,
+            product_name: product.name,
+            product_price: price,
+        },
+    };
+};
+
+const buildKarakDynamicProductDto = () => buildDealerDynamicProductDto(KARAK_DYNAMIC_APP);
 
 class DealerApiError extends Error {
     constructor(message, details = {}) {
@@ -252,8 +322,10 @@ class DealerApiAdapter extends BaseProviderAdapter {
             }
 
             const providerProductId = params.providerProductId ?? params.externalProductId ?? params.productId;
-            const isKarakDynamicProduct = String(providerProductId || '').trim() === KARAK_DYNAMIC_PRODUCT_ID;
-            const saleParams = isKarakDynamicProduct
+            const dynamicProduct = getDealerDynamicProduct(this.provider);
+            const isDealerDynamicProduct = Boolean(dynamicProduct)
+                && String(providerProductId || '').trim() === dynamicProduct.id;
+            const saleParams = isDealerDynamicProduct
                 ? {
                     toUserId: targetId,
                     coins: Number(params.quantity),
@@ -314,8 +386,10 @@ class DealerApiAdapter extends BaseProviderAdapter {
     }
 
     async getProducts() {
-        if (isKarakProvider(this.provider)) {
-            return [buildKarakDynamicProductDto()];
+        const dynamicApp = getDealerDynamicApp(this.provider);
+
+        if (dynamicApp) {
+            return [buildDealerDynamicProductDto(dynamicApp)];
         }
 
         return [];
@@ -343,6 +417,12 @@ class DealerApiAdapter extends BaseProviderAdapter {
 module.exports = {
     DealerApiAdapter,
     DealerApiError,
+    DEALER_DYNAMIC_APPS,
+    getDealerDynamicApp,
+    getDealerDynamicProduct,
+    getDealerDynamicProductById,
+    buildDealerDynamicProductDto,
+    isDealerDynamicProvider,
     KARAK_DYNAMIC_PRODUCT_ID,
     KARAK_DYNAMIC_PRODUCT,
     buildKarakDynamicProductDto,

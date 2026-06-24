@@ -17,11 +17,14 @@
 const { ProviderProduct } = require('./providerProduct.model');
 const { Provider } = require('./provider.model');
 const { NotFoundError } = require('../../shared/errors/AppError');
+const { normalizeProviderDecimalPrice } = require('../../shared/utils/decimalPrecision');
 const {
     KARAK_DYNAMIC_PRODUCT_ID,
     KARAK_DYNAMIC_PRODUCT,
-    buildKarakDynamicProductDto,
     isKarakProvider,
+    getDealerDynamicApp,
+    getDealerDynamicProductById,
+    buildDealerDynamicProductDto,
 } = require('./adapters/dealerApi.service');
 
 const toPlainObject = (value) => {
@@ -32,54 +35,124 @@ const toPlainObject = (value) => {
     return { ...value };
 };
 
-const isKarakDynamicProduct = (product) => (
-    String(product?.externalProductId || '').trim() === KARAK_DYNAMIC_PRODUCT_ID
+const toRawPayloadObject = (rawPayload) => (
+    rawPayload && typeof rawPayload === 'object' && !Array.isArray(rawPayload)
+        ? rawPayload
+        : {}
 );
 
-const normalizeKarakDynamicProduct = (product) => {
-    const plain = toPlainObject(product);
-    if (!isKarakDynamicProduct(plain)) return plain;
+const PRICE_FIELD_KEYS = Object.freeze([
+    'price',
+    'rawPrice',
+    'costPrice',
+    'providerPrice',
+    'product_price',
+    'base_price',
+    'basePrice',
+]);
 
-    const price = Number(KARAK_DYNAMIC_PRODUCT.price);
+const normalizeRawPayloadPrices = (rawPayload) => {
+    const payload = toRawPayloadObject(rawPayload);
+
+    if (!Object.keys(payload).length) return rawPayload ?? null;
+
+    const normalized = { ...payload };
+    for (const key of PRICE_FIELD_KEYS) {
+        if (Object.prototype.hasOwnProperty.call(normalized, key)) {
+            normalized[key] = normalizeProviderDecimalPrice(normalized[key]);
+        }
+    }
+
+    return normalized;
+};
+
+const normalizeProviderProductPrices = (product) => {
+    const plain = toPlainObject(product);
+    if (!plain) return plain;
+
+    const normalized = { ...plain };
+
+    for (const key of PRICE_FIELD_KEYS) {
+        if (Object.prototype.hasOwnProperty.call(normalized, key)) {
+            normalized[key] = normalizeProviderDecimalPrice(normalized[key]);
+        }
+    }
+
+    normalized.rawPayload = normalizeRawPayloadPrices(normalized.rawPayload);
+
+    return normalized;
+};
+
+const buildNormalizedDynamicProduct = (product, dynamicProduct) => {
+    const plain = normalizeProviderProductPrices(product);
+    const price = normalizeProviderDecimalPrice(dynamicProduct.price);
 
     return {
         ...plain,
         id: plain.id ?? plain._id,
-        externalProductId: KARAK_DYNAMIC_PRODUCT.id,
-        rawName: KARAK_DYNAMIC_PRODUCT.name,
+        externalProductId: dynamicProduct.id,
+        rawName: dynamicProduct.name,
         rawPrice: price,
         price,
         costPrice: price,
         providerPrice: price,
-        minQty: KARAK_DYNAMIC_PRODUCT.minQty,
-        maxQty: KARAK_DYNAMIC_PRODUCT.maxQty,
+        minQty: dynamicProduct.minQty,
+        maxQty: dynamicProduct.maxQty,
         isActive: true,
         rawPayload: {
-            ...(plain.rawPayload || {}),
-            ...KARAK_DYNAMIC_PRODUCT,
-            product_id: KARAK_DYNAMIC_PRODUCT.id,
-            product_name: KARAK_DYNAMIC_PRODUCT.name,
+            ...toRawPayloadObject(plain.rawPayload),
+            ...dynamicProduct,
+            product_id: dynamicProduct.id,
+            product_name: dynamicProduct.name,
             product_price: price,
         },
     };
 };
 
-const ensureKarakDynamicProduct = async (providerId) => {
+const isDealerDynamicProduct = (product) => Boolean(
+    getDealerDynamicProductById(product?.externalProductId)
+);
+
+const isKarakDynamicProduct = (product) => (
+    String(product?.externalProductId || '').trim() === KARAK_DYNAMIC_PRODUCT_ID
+);
+
+const normalizeDealerDynamicProduct = (product) => {
+    const plain = normalizeProviderProductPrices(product);
+    const dynamicProduct = getDealerDynamicProductById(plain?.externalProductId);
+
+    if (!dynamicProduct) return plain;
+
+    return buildNormalizedDynamicProduct(plain, dynamicProduct);
+};
+
+const normalizeKarakDynamicProduct = (product) => {
+    const plain = normalizeProviderProductPrices(product);
+
+    if (!isKarakDynamicProduct(plain)) return plain;
+
+    return buildNormalizedDynamicProduct(plain, KARAK_DYNAMIC_PRODUCT);
+};
+
+const ensureDynamicProduct = async (providerId, resolveDynamicApp) => {
     if (!providerId) return null;
 
     const provider = await Provider.findById(providerId)
-        .select('name slug isActive')
+        .select('name slug code providerCode isActive')
         .lean();
 
-    if (!provider || !isKarakProvider(provider)) return null;
+    if (!provider) return null;
 
-    const dto = buildKarakDynamicProductDto();
+    const dynamicApp = resolveDynamicApp(provider);
+    if (!dynamicApp) return null;
+
+    const dto = buildDealerDynamicProductDto(dynamicApp);
     const now = new Date();
 
     return ProviderProduct.findOneAndUpdate(
         {
             provider: provider._id,
-            externalProductId: KARAK_DYNAMIC_PRODUCT_ID,
+            externalProductId: dto.externalProductId,
         },
         {
             $set: {
@@ -99,6 +172,16 @@ const ensureKarakDynamicProduct = async (providerId) => {
         }
     );
 };
+
+const ensureDealerDynamicProduct = (providerId) => ensureDynamicProduct(
+    providerId,
+    getDealerDynamicApp
+);
+
+const ensureKarakDynamicProduct = (providerId) => ensureDynamicProduct(
+    providerId,
+    (provider) => (isKarakProvider(provider) ? getDealerDynamicApp(provider) : null)
+);
 
 // =============================================================================
 // LIST / SEARCH
@@ -120,7 +203,7 @@ const listProviderProducts = async (filter = {}, { page = 1, limit = 500, search
     const query = { ...filter };
 
     if (query.provider) {
-        await ensureKarakDynamicProduct(query.provider);
+        await ensureDealerDynamicProduct(query.provider);
     }
 
     if (search) {
@@ -140,7 +223,7 @@ const listProviderProducts = async (filter = {}, { page = 1, limit = 500, search
     ]);
 
     return {
-        products: products.map(normalizeKarakDynamicProduct),
+        products: products.map(normalizeDealerDynamicProduct),
         pagination: {
             page,
             limit,
@@ -161,7 +244,7 @@ const listProviderProducts = async (filter = {}, { page = 1, limit = 500, search
 const getProviderProductById = async (id) => {
     const pp = await ProviderProduct.findById(id).populate('provider', 'name slug isActive');
     if (!pp) throw new NotFoundError('ProviderProduct');
-    return normalizeKarakDynamicProduct(pp);
+    return normalizeDealerDynamicProduct(pp);
 };
 
 // =============================================================================
@@ -190,6 +273,10 @@ module.exports = {
     listProviderProducts,
     getProviderProductById,
     setTranslatedName,
+    ensureDealerDynamicProduct,
     ensureKarakDynamicProduct,
+    normalizeDealerDynamicProduct,
     normalizeKarakDynamicProduct,
+    isDealerDynamicProduct,
+    isKarakDynamicProduct,
 };

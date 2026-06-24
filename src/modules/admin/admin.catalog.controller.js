@@ -16,6 +16,7 @@
 
 const { sendSuccess, sendCreated, sendPaginated } = require('../../shared/utils/apiResponse');
 const catchAsync = require('../../shared/utils/catchAsync');
+const { normalizeProviderDecimalPrice } = require('../../shared/utils/decimalPrecision');
 
 const catalogService = require('../providers/providerCatalog.service');
 const providerService = require('../providers/provider.service');
@@ -101,11 +102,9 @@ const getProviderProduct = catchAsync(async (req, res) => {
 const getProviderProductPrice = catchAsync(async (req, res) => {
     const pp = await ppService.getProviderProductById(req.params.id);
     // Prefer rawPayload.product_price (original provider precision) over rawPrice.
-    // Karak's dynamic product is serialized by providerProduct.service with a
-    // numeric product_price so stale DB strings never leak back to the admin UI.
+    // Return a plain decimal string so tiny prices never serialize as `1e-8`.
     const rawPriceValue = pp.rawPayload?.product_price ?? pp.rawPrice ?? 0;
-    const parsedRawPrice = Number(rawPriceValue);
-    const rawPrice = Number.isFinite(parsedRawPrice) ? parsedRawPrice : rawPriceValue;
+    const rawPrice = normalizeProviderDecimalPrice(rawPriceValue);
     const providerId = pp.provider?._id?.toString?.()
         ?? pp.provider?.toString?.()
         ?? '';

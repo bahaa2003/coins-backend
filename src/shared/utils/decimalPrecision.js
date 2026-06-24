@@ -41,6 +41,35 @@ const toDecimal = (value) => {
 /** String result, trimmed to PRICE_DP. */
 const toStr = (d) => d.toDecimalPlaces(PRICE_DP).toFixed(PRICE_DP).replace(/\.?0+$/, '') || '0';
 
+const getDecimalInput = (value) => {
+    if (value && typeof value === 'object') {
+        if (value.$numberDecimal !== undefined) return value.$numberDecimal;
+        if (typeof value.toString === 'function') return value.toString();
+    }
+
+    return value;
+};
+
+/**
+ * Normalize provider prices into plain decimal strings.
+ *
+ * This intentionally accepts scientific notation from JS numbers/strings
+ * (`1e-8`) and converts it to a non-exponential representation
+ * (`0.00000001`) before values reach storage or the admin UI.
+ */
+const normalizeProviderDecimalPrice = (value) => {
+    const raw = getDecimalInput(value);
+
+    try {
+        if (raw === null || raw === undefined || raw === '') return '0';
+        const decimal = new Decimal(raw);
+        if (!decimal.isFinite() || decimal.isNegative()) return '0';
+        return toStr(decimal);
+    } catch {
+        return '0';
+    }
+};
+
 // ─── Arithmetic (all return String) ───────────────────────────────────────────
 
 const add      = (a, b) => toStr(toDecimal(a).plus(toDecimal(b)));
@@ -96,6 +125,7 @@ module.exports = {
     toDecimal,
     PRICE_DP,
     toStr,
+    normalizeProviderDecimalPrice,
     add,
     subtract,
     multiply,

@@ -49,6 +49,7 @@ const { ProviderProduct } = require('./providerProduct.model');
 const { Product, PRICING_MODES, computeFinalPrice } = require('../products/product.model');
 const { getAdapter } = require('./adapters/adapter.factory');
 const { NotFoundError, BusinessRuleError } = require('../../shared/errors/AppError');
+const { normalizeProviderDecimalPrice } = require('../../shared/utils/decimalPrecision');
 
 // =============================================================================
 // CONFIGURATION
@@ -125,6 +126,32 @@ const runWithConcurrency = async (tasks, limit) => {
     return results;
 };
 
+const PRICE_PAYLOAD_KEYS = Object.freeze([
+    'price',
+    'rawPrice',
+    'costPrice',
+    'providerPrice',
+    'product_price',
+    'base_price',
+    'basePrice',
+]);
+
+const normalizeRawPayloadPrices = (rawPayload) => {
+    if (!rawPayload || typeof rawPayload !== 'object' || Array.isArray(rawPayload)) {
+        return rawPayload ?? null;
+    }
+
+    const normalized = { ...rawPayload };
+
+    for (const key of PRICE_PAYLOAD_KEYS) {
+        if (Object.prototype.hasOwnProperty.call(normalized, key)) {
+            normalized[key] = normalizeProviderDecimalPrice(normalized[key]);
+        }
+    }
+
+    return normalized;
+};
+
 // =============================================================================
 // UPSERT HELPER
 // =============================================================================
@@ -136,9 +163,19 @@ const runWithConcurrency = async (tasks, limit) => {
  * @param {ObjectId} providerId
  * @param {Object}   dto
  * @param {Date}     now
- * @returns {Promise<{ doc: Document, isNew: boolean }>}
+ * @returns {Promise<{ doc: Document, isNew: boolean, rawPrice: string }>}
  */
 const _upsertOne = async (providerId, dto, now) => {
+    const rawPrice = normalizeProviderDecimalPrice(
+        dto.rawPrice
+        ?? dto.providerPrice
+        ?? dto.price
+        ?? dto.rawPayload?.product_price
+        ?? dto.rawPayload?.price
+        ?? 0
+    );
+    const rawPayload = normalizeRawPayloadPrices(dto.rawPayload ?? null);
+
     const doc = await ProviderProduct.findOneAndUpdate(
         {
             provider: providerId,
@@ -147,11 +184,11 @@ const _upsertOne = async (providerId, dto, now) => {
         {
             $set: {
                 rawName: dto.rawName,
-                rawPrice: dto.rawPrice,
+                rawPrice,
                 minQty: dto.minQty ?? 1,
                 maxQty: dto.maxQty ?? 9999,
                 isActive: dto.isActive ?? true,
-                rawPayload: dto.rawPayload ?? null,
+                rawPayload,
                 lastSyncedAt: now,
                 // translatedName intentionally absent — admin-owned field
             },
@@ -169,7 +206,7 @@ const _upsertOne = async (providerId, dto, now) => {
     const updatedMs = doc.updatedAt?.getTime() ?? 0;
     const isNew = Math.abs(createdMs - updatedMs) < 100;
 
-    return { doc, isNew };
+    return { doc, isNew, rawPrice };
 };
 
 // =============================================================================
@@ -210,8 +247,7 @@ const _performSync = async (provider, adapterOptions) => {
     //
     const tasks = dtos.map((dto) => async () => {
         seenExternalIds.add(String(dto.externalProductId));
-        const { doc, isNew } = await _upsertOne(provider._id, dto, now);
-        return { doc, isNew, rawPrice: dto.rawPrice };
+        return _upsertOne(provider._id, dto, now);
     });
 
     const settlements = await runWithConcurrency(tasks, UPSERT_CONCURRENCY);
@@ -424,6 +460,7 @@ const syncAllProviders = async (adapterOptions = {}) => {
 const recalcProductPrices = async (providerProductId) => {
     const pp = await ProviderProduct.findById(providerProductId);
     if (!pp) throw new NotFoundError('ProviderProduct');
+    const rawPrice = normalizeProviderDecimalPrice(pp.rawPrice);
 
     const products = await Product.find({
         providerProduct: providerProductId,
@@ -433,12 +470,12 @@ const recalcProductPrices = async (providerProductId) => {
     let modifiedCount = 0;
 
     for (const product of products) {
-        const newFinalPrice = computeFinalPrice(pp.rawPrice, product.markupType, product.markupValue);
-        const newBasePrice = newFinalPrice ?? String(pp.rawPrice);
+        const newFinalPrice = computeFinalPrice(rawPrice, product.markupType, product.markupValue);
+        const newBasePrice = newFinalPrice ?? rawPrice;
 
         await Product.findByIdAndUpdate(product._id, {
             $set: {
-                providerPrice: String(pp.rawPrice),
+                providerPrice: rawPrice,
                 finalPrice: newFinalPrice,
                 basePrice: newBasePrice,
             },

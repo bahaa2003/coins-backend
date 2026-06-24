@@ -1,5 +1,7 @@
 'use strict';
 
+const { normalizeProviderDecimalPrice } = require('../../shared/utils/decimalPrecision');
+
 /**
  * providerPriceCache.js — In-Memory Provider Price Cache
  * ──────────────────────────────────────────────────────
@@ -16,7 +18,7 @@
  *   subsequent orders within the TTL window.
  *
  * Design:
- *   - Simple Map<providerId, { prices: Map<externalProductId, rawPrice>, expiresAt }>
+ *   - Simple Map<providerId, { prices: Map<externalProductId, rawPriceString>, expiresAt }>
  *   - No external dependencies (no Redis required for single-process deployment)
  *   - Thread-safe for single-process Node.js (event loop guarantees)
  *   - Stampede protection: concurrent cache misses for the same provider share
@@ -36,7 +38,7 @@ const CACHE_TTL_MS = parseInt(process.env.PROVIDER_PRICE_CACHE_TTL_MS ?? String(
 // ─── Internal State ───────────────────────────────────────────────────────────
 
 /**
- * @type {Map<string, { prices: Map<string, number>, expiresAt: number }>}
+ * @type {Map<string, { prices: Map<string, string>, expiresAt: number }>}
  */
 const _cache = new Map();
 
@@ -60,7 +62,7 @@ const _pending = new Map();
  * @param {string}              providerId          - Provider document _id
  * @param {string}              externalProductId   - The provider's product/service ID
  * @param {BaseProviderAdapter} adapter             - Resolved provider adapter instance
- * @returns {Promise<number|null>}  rawPrice, or null if product not found in catalog
+ * @returns {Promise<string|null>}  rawPrice, or null if product not found in catalog
  */
 const getLivePrice = async (providerId, externalProductId, adapter) => {
     const key = String(providerId);
@@ -112,16 +114,16 @@ const clearAll = () => {
  *
  * @param {string}              key     - providerId as string
  * @param {BaseProviderAdapter} adapter
- * @returns {Promise<Map<string, number>>}
+ * @returns {Promise<Map<string, string>>}
  * @private
  */
 const _fetchAndCache = async (key, adapter) => {
     const dtos = await adapter.getProducts();
 
-    /** @type {Map<string, number>} */
+    /** @type {Map<string, string>} */
     const prices = new Map();
     for (const dto of dtos) {
-        prices.set(String(dto.externalProductId), dto.rawPrice);
+        prices.set(String(dto.externalProductId), normalizeProviderDecimalPrice(dto.rawPrice));
     }
 
     _cache.set(key, {

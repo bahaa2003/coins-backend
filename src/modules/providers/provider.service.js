@@ -8,6 +8,7 @@ const {
     ConflictError,
     BusinessRuleError,
 } = require('../../shared/errors/AppError');
+const { normalizeProviderDecimalPrice } = require('../../shared/utils/decimalPrecision');
 
 // =============================================================================
 // PROVIDER CRUD
@@ -165,7 +166,7 @@ const publishProduct = async ({
 
     // If sync mode, override basePrice with current rawPrice
     const resolvedBasePrice = pricingMode === PRICING_MODES.SYNC
-        ? String(pp.rawPrice)
+        ? normalizeProviderDecimalPrice(pp.rawPrice)
         : String(basePrice);
 
     const product = await Product.create({
@@ -216,7 +217,7 @@ const updatePublishedProduct = async (productId, updates) => {
     );
 
     if (switchingToSync) {
-        safe.basePrice = String(product.providerProduct.rawPrice);
+        safe.basePrice = normalizeProviderDecimalPrice(product.providerProduct.rawPrice);
     }
 
     // Manual mode: allow admin to set basePrice freely (already in safe object)
